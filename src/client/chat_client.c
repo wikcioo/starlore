@@ -8,6 +8,10 @@
 #include <poll.h>
 #include <arpa/inet.h>
 #include <time.h>
+#include <pthread.h>
+
+#include <glad/glad.h>
+#include <GLFW/glfw3.h>
 
 #include "defines.h"
 #include "common/packet.h"
@@ -15,10 +19,12 @@
 #define POLLFD_COUNT 2
 #define INPUT_BUFFER_SIZE 1024
 
+static struct pollfd pfds[POLLFD_COUNT];
 static i32 client_socket;
 static char input_buffer[INPUT_BUFFER_SIZE] = {0};
 static u32 input_count = 0;
 static char username[MAX_AUTHOR_SIZE];
+static b8 running = false;
 
 b8 handle_client_validation(i32 client)
 {
@@ -154,7 +160,7 @@ void handle_socket_event(void)
         fprintf(stderr, "unimplemented\n"); /* TODO: Handle the case of having read less than header size */
     } else {
         packet_header_t *header = (packet_header_t *)buffer;
-        if (bytes_read - sizeof(packet_header_t) < header->size) { 
+        if (bytes_read - sizeof(packet_header_t) < header->size) {
             fprintf(stderr, "unimplemented\n"); /* TODO: Handle the case of not having read the entire packet body */
         } else {
             switch (header->type) {
@@ -190,6 +196,39 @@ void handle_socket_event(void)
     }
 }
 
+#define WINDOW_WIDTH 1280
+#define WINDOW_HEIGHT 720
+
+void *handle_networking(void *args)
+{
+    while (running) {
+        /* TODO: Figure out a better way to interrupt poll() rather than setting 200ms timeout */
+        i32 num_events = poll(pfds, POLLFD_COUNT, 200);
+
+        if (num_events == -1) {
+            perror("poll event");
+            exit(EXIT_FAILURE);
+        }
+
+        for (i32 i = 0; i < POLLFD_COUNT; i++) {
+            if (pfds[i].revents & POLLIN) {
+                if (pfds[i].fd == STDIN_FILENO) { /* Input from stdin */
+                    handle_stdin_event();
+                } else if (pfds[i].fd == client_socket) { /* Server trying to send data */
+                    handle_socket_event();
+                }
+            }
+        }
+    }
+
+    return NULL;
+}
+
+void glfw_error_callback(i32 code, const char *description)
+{
+    fprintf(stderr, "glfw error code: %d (%s)\n", code, description);
+}
+
 int main(int argc, char *argv[])
 {
     if (argc != 4) {
@@ -199,12 +238,38 @@ int main(int argc, char *argv[])
 
     memcpy(username, argv[3], strlen(argv[3]));
 
+    if (glfwInit() != GLFW_TRUE) {
+        fprintf(stderr, "failed to initialize glfw\n");
+        exit(EXIT_FAILURE);
+    }
+
+    glfwSetErrorCallback(glfw_error_callback);
+
+    GLFWwindow *window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Chat Client", NULL, NULL);
+    if (window == NULL) {
+        fprintf(stderr, "failed to create glfw window\n");
+        glfwTerminate();
+        exit(EXIT_FAILURE);
+    }
+
+    glfwMakeContextCurrent(window);
+
+    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
+        fprintf(stderr, "failed to load gl\n");
+        glfwDestroyWindow(window);
+        glfwTerminate();
+        exit(EXIT_FAILURE);
+    }
+
+    printf("running opengl version %d.%d\n", GLVersion.major, GLVersion.minor);
+    printf("running glfw version %s\n", glfwGetVersionString());
+
     struct addrinfo hints, *result, *rp;
     memset(&hints, 0, sizeof(hints));
 
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
-    
+
     i32 status_code = getaddrinfo(argv[1], argv[2], &hints, &result);
     if (status_code != 0) {
         fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(status_code));
@@ -234,7 +299,6 @@ int main(int argc, char *argv[])
 
     printf("connected to server at %s:%s\n", argv[1], argv[2]);
 
-    struct pollfd pfds[POLLFD_COUNT];
     pfds[0].fd = STDIN_FILENO;
     pfds[0].events = POLLIN;
 
@@ -249,24 +313,25 @@ int main(int argc, char *argv[])
 
     puts("client successfully validated");
 
-    for (;;) {
-        i32 num_events = poll(pfds, POLLFD_COUNT, -1);
+    running = true;
 
-        if (num_events == -1) {
-            perror("poll event");
-            exit(EXIT_FAILURE);
-        }
+    pthread_t network_thread;
+    pthread_create(&network_thread, NULL, handle_networking, NULL);
 
-        for (i32 i = 0; i < POLLFD_COUNT; i++) {
-            if (pfds[i].revents & POLLIN) {
-                if (pfds[i].fd == STDIN_FILENO) { /* Input from stdin */
-                    handle_stdin_event();
-                } else if (pfds[i].fd == client_socket) { /* Server trying to send data */
-                    handle_socket_event();
-                }
-            }
-        }
+    while (!glfwWindowShouldClose(window)) {
+        glClearColor(0.3f, 0.5f, 0.9f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        glfwPollEvents();
+        glfwSwapBuffers(window);
     }
+
+    running = false;
+
+    glfwDestroyWindow(window);
+    glfwTerminate();
+
+    pthread_join(network_thread, NULL);
 
     return EXIT_SUCCESS;
 }

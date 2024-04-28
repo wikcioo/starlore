@@ -3,10 +3,12 @@
         {
             "name": "Linux",
             "includePath": [
-                "${workspaceFolder}/src"
+                "${workspaceFolder}/src",
+                "${workspaceFolder}/src/vendor/glad/include",
             ],
             "defines": [
-                "_POSIX_C_SOURCE=200112L"
+                "_POSIX_C_SOURCE=200112L",
+                "__USE_POSIX199309"
             ],
             "compilerPath": "/usr/bin/clang",
             "cStandard": "c11",
