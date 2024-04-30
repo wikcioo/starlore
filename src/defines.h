@@ -3,6 +3,10 @@
 #define true 1
 #define false 0
 
+#define INLINE static inline
+
+#define BIT(x) (1 << (x))
+
 #if defined(__clang__) || defined(__GNUC__)
     #define STATIC_ASSERT _Static_assert
 #else
