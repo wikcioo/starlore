@@ -2,11 +2,21 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Launch (Linux)",
+            "name": "Launch Client (Linux)",
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/client/client",
             "args": ["127.0.0.1", "8888", "debug_username"],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": []
+        },
+        {
+            "name": "Launch Server (Linux)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/server/server",
+            "args": ["8888"],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": []

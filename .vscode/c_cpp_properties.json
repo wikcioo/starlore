@@ -4,13 +4,12 @@
             "name": "Linux",
             "includePath": [
                 "${workspaceFolder}/src",
-                "${workspaceFolder}/src/vendor/glad/include",
+                "${workspaceFolder}/src/vendor/glad/include"
             ],
             "defines": [
                 "DEBUG",
                 "ENABLE_ASSERTIONS",
-                "_POSIX_C_SOURCE=200112L",
-                "__USE_POSIX199309"
+                "_GNU_SOURCE"
             ],
             "compilerPath": "/usr/bin/clang",
             "cStandard": "c11",

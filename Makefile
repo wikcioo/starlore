@@ -38,7 +38,7 @@ server:
 $(BUILD_DIR)/client/client: $(CLIENT_OBJECTS) $(COMMON_OBJECTS)
 	$(CC) $^ -lglfw -o $@
 
-$(BUILD_DIR)/server/server: $(SERVER_OBJECTS)
+$(BUILD_DIR)/server/server: $(SERVER_OBJECTS) $(COMMON_OBJECTS)
 	$(CC) $^ -o $@
 
 $(BUILD_DIR)/client/%.c.o: $(CLIENT_DIR)/%.c

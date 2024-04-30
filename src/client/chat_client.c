@@ -9,16 +9,34 @@
 #include <arpa/inet.h>
 #include <time.h>
 #include <pthread.h>
+#include <errno.h>
+#include <signal.h>
 
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 
 #include "defines.h"
+#include "shader.h"
 #include "common/packet.h"
+#include "common/logger.h"
+#include "common/maths.h"
 
 #define POLLFD_COUNT 2
 #define INPUT_BUFFER_SIZE 1024
+#define POLL_INFINITE_TIMEOUT -1
 
+#define WINDOW_WIDTH 1280
+#define WINDOW_HEIGHT 720
+
+typedef struct player {
+    player_id id;
+    vec2 position;
+    vec3 color;
+} player_t;
+
+static u32 other_player_count = 0;
+static player_t other_players[MAX_PLAYER_COUNT];
+static player_t self_player;
 static struct pollfd pfds[POLLFD_COUNT];
 static i32 client_socket;
 static char input_buffer[INPUT_BUFFER_SIZE] = {0};
@@ -34,9 +52,9 @@ b8 handle_client_validation(i32 client)
     bytes_read = recv(client, (void *)&puzzle_buffer, sizeof(puzzle_buffer), 0); /* TODO: Handle unresponsive server */
     if (bytes_read <= 0) {
         if (bytes_read == -1) {
-            perror("validation: recv error");
+            LOG_ERROR("validation: recv error: %s", strerror(errno));
         } else if (bytes_read == 0) {
-            fprintf(stderr, "validation: orderly shutdown\n");
+            LOG_ERROR("validation: orderly shutdown");
         }
         return false;
     }
@@ -45,10 +63,10 @@ b8 handle_client_validation(i32 client)
         u64 answer = puzzle_buffer ^ 0xDEADBEEFCAFEBABE; /* TODO: Come up with a better validation function */
         bytes_sent = send(client, (void *)&answer, sizeof(answer), 0);
         if (bytes_sent == -1) {
-            perror("validation: send error");
+            LOG_ERROR("validation: send error: %s", strerror(errno));
             return false;
         } else if (bytes_sent != sizeof(answer)) {
-            fprintf(stderr, "validation: failed to send %lu bytes of validation data\n", sizeof(answer));
+            LOG_ERROR("validation: failed to send %lu bytes of validation data", sizeof(answer));
             return false;
         }
 
@@ -56,9 +74,9 @@ b8 handle_client_validation(i32 client)
         bytes_read = recv(client, (void *)&status_buffer, sizeof(status_buffer), 0);
         if (bytes_read <= 0) {
             if (bytes_read == -1) {
-                perror("validation status: recv error");
+                LOG_ERROR("validation status: recv error: %s", strerror(errno));
             } else if (bytes_read == 0) {
-                fprintf(stderr, "validation status: orderly shutdown\n");
+                LOG_ERROR("validation status: orderly shutdown");
             }
             return false;
         }
@@ -66,15 +84,29 @@ b8 handle_client_validation(i32 client)
         return status_buffer;
     }
 
-    fprintf(stderr, "validation: received incorrect number of bytes\n");
+    LOG_ERROR("validation: received incorrect number of bytes");
     return false;
+}
+
+void send_ping_packet(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    u64 time_now = (u64)(ts.tv_sec * 1000000000 + ts.tv_nsec);
+
+    packet_ping_t ping_packet = {
+        .time = time_now
+    };
+    if (!packet_send(client_socket, PACKET_TYPE_PING, &ping_packet)) {
+        LOG_ERROR("failed to send ping packet");
+    }
 }
 
 void handle_stdin_event(void)
 {
     char ch;
     if (read(STDIN_FILENO, &ch, 1) == -1) {
-        perror("stdin read");
+        LOG_ERROR("stdin read: %s", strerror(errno));
         return;
     }
 
@@ -83,55 +115,27 @@ void handle_stdin_event(void)
     } else if (ch == '\n') { /* Send packet over the socket based on input buffer */
         if (input_buffer[0] == '/') { /* Handle special commands */
             if (strcmp(&input_buffer[1], "ping") == 0) {
-                struct timespec ts;
-                clock_gettime(CLOCK_MONOTONIC, &ts);
-                u64 time_now = (u64)(ts.tv_sec * 1000000000 + ts.tv_nsec);
-
-                packet_header_t header = { .type = PACKET_TYPE_PING, .size = sizeof(packet_ping_t) };
-                packet_ping_t ping = { .time = time_now };
-
-                u32 buffer_size = sizeof(header) + sizeof(ping);
-                b8 *buffer = (b8 *)malloc(buffer_size); /* TODO: Replace with throwaway memory allocator*/
-                memset(buffer, 0, buffer_size);
-
-                memcpy(buffer, &header, sizeof(header));
-                memcpy(buffer + sizeof(header), &ping, sizeof(ping));
-
-                i64 bytes_sent = send(client_socket, buffer, buffer_size, 0);
-                if (bytes_sent == -1) {
-                    perror("ping send error");
-                }
-
-                free(buffer);
+                send_ping_packet();
             } else if (strcmp(&input_buffer[1], "quit") == 0) {
                 close(client_socket);
                 exit(EXIT_SUCCESS);
             } else {
-                fprintf(stderr, "unknown command\n");
+                LOG_WARN("unknown command");
             }
 
             input_count = 0;
             memset(input_buffer, 0, INPUT_BUFFER_SIZE);
         } else {
-            packet_header_t header = { .type = PACKET_TYPE_MESSAGE, .size = sizeof(packet_message_t) };
-            packet_message_t message = {0};
+            packet_message_t message_packet = {0};
 
-            memcpy(message.author, username, strlen(username));
-            memcpy(message.content, input_buffer, input_count);
+            u32 username_size = strlen(username) > MAX_AUTHOR_SIZE ? MAX_AUTHOR_SIZE : strlen(username);
+            strncpy(message_packet.author, username, username_size);
+            u32 content_size = input_count > MAX_CONTENT_SIZE ? MAX_CONTENT_SIZE : input_count;
+            strncpy(message_packet.content, input_buffer, content_size);
 
-            u32 buffer_size = sizeof(header) + sizeof(message);
-            b8 *buffer = (b8 *)malloc(buffer_size); /* TODO: Replace with throwaway memory allocator*/
-            memset(buffer, 0, buffer_size);
-
-            memcpy(buffer, &header, sizeof(header));
-            memcpy(buffer + sizeof(header), &message, sizeof(message));
-
-            i64 bytes_sent = send(client_socket, buffer, buffer_size, 0);
-            if (bytes_sent == -1) {
-                perror("ping send error");
+            if (!packet_send(client_socket, PACKET_TYPE_MESSAGE, &message_packet)) {
+                LOG_ERROR("failed to send message packet");
             }
-
-            free(buffer);
 
             input_count = 0;
             memset(input_buffer, 0, INPUT_BUFFER_SIZE);
@@ -142,71 +146,148 @@ void handle_stdin_event(void)
 void handle_socket_event(void)
 {
     #define INPUT_BUFFER_SIZE 1024
-    u8 buffer[INPUT_BUFFER_SIZE] = {0};
+    u8 recv_buffer[INPUT_BUFFER_SIZE] = {0};
 
-    i64 bytes_read = recv(client_socket, &buffer, INPUT_BUFFER_SIZE, 0);
+    i64 bytes_read = recv(client_socket, &recv_buffer, INPUT_BUFFER_SIZE, 0);
     if (bytes_read <= 0) {
         if (bytes_read == -1) {
-            perror("recv error");
+            LOG_ERROR("recv error: %s", strerror(errno));
         } else if (bytes_read == 0) {
-            fprintf(stderr, "orderly shutdown\n");
+            LOG_INFO("orderly shutdown: disconnected from server");
             close(client_socket);
             exit(EXIT_FAILURE);
         }
         return;
     }
 
-    if (bytes_read < sizeof(packet_header_t)) { /* Check if at least 'header' amount of bytes were read */
-        fprintf(stderr, "unimplemented\n"); /* TODO: Handle the case of having read less than header size */
+    if (bytes_read < PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]) { /* Check if at least 'header' amount of bytes were read */
+        LOG_WARN("unimplemented"); /* TODO: Handle the case of having read less than header size */
     } else {
-        packet_header_t *header = (packet_header_t *)buffer;
-        if (bytes_read - sizeof(packet_header_t) < header->size) {
-            fprintf(stderr, "unimplemented\n"); /* TODO: Handle the case of not having read the entire packet body */
-        } else {
-            switch (header->type) {
-                case PACKET_TYPE_NONE: {
-                    fprintf(stderr, "received PACKET_TYPE_NONE, ignoring...\n");
-                } break;
-                case PACKET_TYPE_PING: {
-                    packet_ping_t *data = (packet_ping_t *)(buffer + sizeof(packet_header_t));
+        /* Check if multiple packets included in single tcp data reception */
+        u8 *buffer = recv_buffer;
+        for (;;) {
+            packet_header_t *header = (packet_header_t *)buffer;
 
-                    struct timespec ts;
-                    clock_gettime(CLOCK_MONOTONIC, &ts);
-                    u64 time_now = (u64)(ts.tv_sec * 1000000000 + ts.tv_nsec);
+            if (bytes_read - PACKET_TYPE_SIZE[PACKET_TYPE_HEADER] < header->size) {
+                LOG_WARN("unimplemented"); /* TODO: Handle the case of not having read the entire packet body */
+            } else {
+                u32 received_data_size = 0;
+                switch (header->type) {
+                    case PACKET_TYPE_NONE: {
+                        LOG_WARN("received PACKET_TYPE_NONE, ignoring...");
+                    } break;
+                    case PACKET_TYPE_PING: {
+                        received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_PING];
+                        packet_ping_t *data = (packet_ping_t *)(buffer + PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]);
 
-                    f64 ping_ms = (time_now - data->time) / 1000000.0;
-                    printf("ping = %fms\n", ping_ms);
-                } break;
-                case PACKET_TYPE_MESSAGE: {
-                    packet_message_t *message = (packet_message_t *)(buffer + sizeof(packet_header_t));
-                    struct tm *local_time = localtime((time_t *)&message->timestamp);
-                    printf("[%d-%02d-%02d %02d:%02d] %s: %s\n",
-                           local_time->tm_year + 1900,
-                           local_time->tm_mon + 1,
-                           local_time->tm_mday,
-                           local_time->tm_hour,
-                           local_time->tm_min,
-                           message->author,
-                           message->content);
-                } break;
-                default:
-                    fprintf(stderr, "received unknown packet type, ignoring...\n");
+                        struct timespec ts;
+                        clock_gettime(CLOCK_MONOTONIC, &ts);
+                        u64 time_now = (u64)(ts.tv_sec * 1000000000 + ts.tv_nsec);
+
+                        f64 ping_ms = (time_now - data->time) / 1000000.0;
+                        LOG_TRACE("ping = %fms", ping_ms);
+                    } break;
+                    case PACKET_TYPE_MESSAGE: {
+                        received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_MESSAGE];
+                        packet_message_t *message = (packet_message_t *)(buffer + PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]);
+                        struct tm *local_time = localtime((time_t *)&message->timestamp);
+                        LOG_TRACE("[%d-%02d-%02d %02d:%02d] %s: %s",
+                            local_time->tm_year + 1900,
+                            local_time->tm_mon + 1,
+                            local_time->tm_mday,
+                            local_time->tm_hour,
+                            local_time->tm_min,
+                            message->author,
+                            message->content);
+                    } break;
+                    case PACKET_TYPE_PLAYER_INIT: {
+                        received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_PLAYER_INIT];
+                        packet_player_init_t *player_init = (packet_player_init_t *)(buffer + PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]);
+                        self_player.id       = player_init->id;
+                        self_player.position = player_init->position;
+                        self_player.color    = player_init->color;
+                        LOG_INFO("initialized self: id=%u position=(%f,%f) color=(%f,%f,%f)",
+                                self_player.id,
+                                self_player.position.x, self_player.position.y,
+                                self_player.color.r, self_player.color.g, self_player.color.b);
+                    } break;
+                    case PACKET_TYPE_PLAYER_ADD: {
+                        received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_PLAYER_ADD];
+                        packet_player_add_t *player_add = (packet_player_add_t *)(buffer + PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]);
+
+                        b8 found_free_slot = false;
+                        for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
+                            if (other_players[i].id == PLAYER_INVALID_ID) { /* Free slot */
+                                LOG_INFO("adding new player id=%u", player_add->id);
+                                other_players[i].id       = player_add->id;
+                                other_players[i].position = player_add->position;
+                                other_players[i].color    = player_add->color;
+                                other_player_count++;
+                                found_free_slot = true;
+                                break;
+                            }
+                        }
+                        if (!found_free_slot) {
+                            LOG_ERROR("failed to add new player, no free slots - other_player_count=%u", other_player_count);
+                        }
+                    } break;
+                    case PACKET_TYPE_PLAYER_REMOVE: {
+                        received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_PLAYER_REMOVE];
+                        packet_player_remove_t *player_remove = (packet_player_remove_t *)(buffer + PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]);
+                        b8 found_player_to_remove = false;
+                        for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
+                            if (other_players[i].id == player_remove->id) {
+                                other_players[i].id = PLAYER_INVALID_ID;
+                                found_player_to_remove = true;
+                                break;
+                            }
+                        }
+                        if (!found_player_to_remove) {
+                            LOG_ERROR("failed to find player to remove with id=%u", player_remove->id);
+                        } else {
+                            LOG_INFO("removed player with id=%d", player_remove->id);
+                        }
+                    } break;
+                    case PACKET_TYPE_PLAYER_UPDATE: {
+                        received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_PLAYER_UPDATE];
+                        packet_player_update_t *player_update = (packet_player_update_t *)(buffer + PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]);
+                        b8 found_player_to_update = false;
+                        for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
+                            if (other_players[i].id == player_update->id) {
+                                other_players[i].position = player_update->position;
+                                found_player_to_update = true;
+                                break;
+                            }
+                        }
+                        if (!found_player_to_update) {
+                            LOG_ERROR("failed to update player with id=%u", player_update->id);
+                        }
+                    } break;
+                    default:
+                        LOG_WARN("received unknown packet type, ignoring...");
+                }
+
+                buffer = (buffer + PACKET_TYPE_SIZE[PACKET_TYPE_HEADER] + received_data_size);
+                packet_header_t *next_header = (packet_header_t *)buffer;
+                if (next_header->type <= PACKET_TYPE_NONE || next_header->type >= PACKET_TYPE_COUNT) {
+                    break;
+                }
             }
         }
     }
 }
 
-#define WINDOW_WIDTH 1280
-#define WINDOW_HEIGHT 720
-
 void *handle_networking(void *args)
 {
     while (running) {
-        /* TODO: Figure out a better way to interrupt poll() rather than setting 200ms timeout */
-        i32 num_events = poll(pfds, POLLFD_COUNT, 200);
+        i32 num_events = poll(pfds, POLLFD_COUNT, POLL_INFINITE_TIMEOUT);
 
         if (num_events == -1) {
-            perror("poll event");
+            if (errno == EINTR) {
+                LOG_TRACE("interrupted 'poll' system call");
+                break;
+            }
+            LOG_ERROR("poll error: %s", strerror(errno));
             exit(EXIT_FAILURE);
         }
 
@@ -221,25 +302,75 @@ void *handle_networking(void *args)
         }
     }
 
+    if (close(client_socket) == -1) {
+        LOG_ERROR("error while closing the socket: %s", strerror(errno));
+    } else {
+        LOG_INFO("closed client socket");
+    }
+
     return NULL;
 }
 
 void glfw_error_callback(i32 code, const char *description)
 {
-    fprintf(stderr, "glfw error code: %d (%s)\n", code, description);
+    LOG_ERROR("glfw error code: %d (%s)", code, description);
+}
+
+void glfw_framebuffer_size_callback(GLFWwindow* window, i32 width, i32 height)
+{
+    glViewport(0, 0, width, height);
+}
+
+void glfw_key_callback(GLFWwindow* window, i32 key, i32 scancode, i32 action, i32 mods)
+{
+    if (key == GLFW_KEY_P && action == GLFW_PRESS)
+        send_ping_packet();
+
+    // TODO: remove temporary code
+    // NOTE: hardcoded velocity, doesn't consider delta time
+    // Check for movement
+    vec2 movement = vec2_zero();
+    f32 velocity = 0.05f;
+    if (key == GLFW_KEY_W) {  /* Up */
+        movement.y += velocity;
+    }
+    if (key == GLFW_KEY_S) { /* Down */
+        movement.y -= velocity;
+    }
+    if (key == GLFW_KEY_A) { /* Left */
+        movement.x -= velocity;
+    }
+    if (key == GLFW_KEY_D) { /* Right */
+        movement.x += velocity;
+    }
+
+    self_player.position = vec2_add(self_player.position, movement);
+
+    packet_player_update_t player_update_packet = {
+        .id       = self_player.id,
+        .position = self_player.position
+    };
+    if (!packet_send(client_socket, PACKET_TYPE_PLAYER_UPDATE, &player_update_packet)) {
+        LOG_ERROR("failed to send player update packet");
+    }
+}
+
+void signal_handler(i32 sig)
+{
+    running = false;
 }
 
 int main(int argc, char *argv[])
 {
     if (argc != 4) {
-        fprintf(stderr, "usage: %s ip port username\n", argv[0]);
+        LOG_FATAL("usage: %s ip port username", argv[0]);
         exit(EXIT_FAILURE);
     }
 
     memcpy(username, argv[3], strlen(argv[3]));
 
     if (glfwInit() != GLFW_TRUE) {
-        fprintf(stderr, "failed to initialize glfw\n");
+        LOG_FATAL("failed to initialize glfw");
         exit(EXIT_FAILURE);
     }
 
@@ -247,22 +378,63 @@ int main(int argc, char *argv[])
 
     GLFWwindow *window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Chat Client", NULL, NULL);
     if (window == NULL) {
-        fprintf(stderr, "failed to create glfw window\n");
+        LOG_FATAL("failed to create glfw window");
         glfwTerminate();
         exit(EXIT_FAILURE);
     }
 
     glfwMakeContextCurrent(window);
+    glfwSetFramebufferSizeCallback(window, glfw_framebuffer_size_callback);
+    glfwSetKeyCallback(window, glfw_key_callback);
 
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
-        fprintf(stderr, "failed to load gl\n");
+        LOG_FATAL("failed to load opengl");
         glfwDestroyWindow(window);
         glfwTerminate();
         exit(EXIT_FAILURE);
     }
 
-    printf("running opengl version %d.%d\n", GLVersion.major, GLVersion.minor);
-    printf("running glfw version %s\n", glfwGetVersionString());
+    LOG_INFO("running opengl version %d.%d", GLVersion.major, GLVersion.minor);
+    LOG_INFO("running glfw version %s", glfwGetVersionString());
+
+    shader_t flat_color_shader;
+
+    shader_create_info_t create_info;
+    create_info.vertex_filepath = "assets/shaders/flat_color.vert";
+    create_info.fragment_filepath = "assets/shaders/flat_color.frag";
+
+    if (shader_create(&create_info, &flat_color_shader)) {
+        LOG_INFO("compiled flat_color_shader");
+    }
+
+    f32 vertices[] = {
+        -0.1f, -0.1f,
+        -0.1f,  0.1f,
+         0.1f,  0.1f,
+         0.1f, -0.1f
+    };
+
+    u32 indices[] = {
+        0, 1, 2,
+        2, 3, 0
+    };
+
+    u32 vao;
+    glGenVertexArrays(1, &vao);
+    glBindVertexArray(vao);
+
+    u32 vbo;
+    glGenBuffers(1, &vbo);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), (void *)vertices, GL_STATIC_DRAW);
+
+    u32 ibo;
+    glGenBuffers(1, &ibo);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), (void *)indices, GL_STATIC_DRAW);
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(f32), 0);
 
     struct addrinfo hints, *result, *rp;
     memset(&hints, 0, sizeof(hints));
@@ -272,7 +444,7 @@ int main(int argc, char *argv[])
 
     i32 status_code = getaddrinfo(argv[1], argv[2], &hints, &result);
     if (status_code != 0) {
-        fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(status_code));
+        LOG_FATAL("getaddrinfo error: %s", gai_strerror(status_code));
         exit(EXIT_FAILURE);
     }
 
@@ -283,7 +455,7 @@ int main(int argc, char *argv[])
         }
 
         if (connect(client_socket, rp->ai_addr, rp->ai_addrlen) == -1) {
-            perror("connect error"); /* TODO: Provide more information about failed parameters */
+            LOG_ERROR("connect error: %s", strerror(errno)); /* TODO: Provide more information about failed parameters */
             continue;
         }
 
@@ -293,11 +465,11 @@ int main(int argc, char *argv[])
     freeaddrinfo(result);
 
     if (rp == NULL) {
-        fprintf(stderr, "failed to connect\n");
+        LOG_FATAL("failed to connect");
         exit(EXIT_FAILURE);
     }
 
-    printf("connected to server at %s:%s\n", argv[1], argv[2]);
+    LOG_INFO("connected to server at %s:%s", argv[1], argv[2]);
 
     pfds[0].fd = STDIN_FILENO;
     pfds[0].events = POLLIN;
@@ -306,31 +478,75 @@ int main(int argc, char *argv[])
     pfds[1].events = POLLIN;
 
     if (!handle_client_validation(client_socket)) {
-        fprintf(stderr, "failed client validation\n");
+        LOG_FATAL("failed client validation");
         close(client_socket);
         exit(EXIT_FAILURE);
     }
 
-    puts("client successfully validated");
+    LOG_INFO("client successfully validated");
 
     running = true;
+
+    struct sigaction sa;
+    sa.sa_flags = SA_RESTART; // Restart functions interruptable by EINTR like poll()
+    sa.sa_handler = &signal_handler;
+    sigaction(SIGINT, &sa, NULL);
 
     pthread_t network_thread;
     pthread_create(&network_thread, NULL, handle_networking, NULL);
 
-    while (!glfwWindowShouldClose(window)) {
+    while (!glfwWindowShouldClose(window) && running) {
         glClearColor(0.3f, 0.5f, 0.9f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
+
+        shader_bind(&flat_color_shader);
+        glBindVertexArray(vao);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo);
+
+        if (self_player.id != PLAYER_INVALID_ID) {
+            /* Draw ourselves */
+            shader_set_uniform_vec3(&flat_color_shader, "u_color", self_player.color.r, self_player.color.g, self_player.color.b);
+            shader_set_uniform_vec2(&flat_color_shader, "u_position_offset", self_player.position.x, self_player.position.y);
+
+            glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, NULL);
+        }
+
+        /* Draw all other players */
+        for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
+            if (other_players[i].id != PLAYER_INVALID_ID) {
+                shader_set_uniform_vec3(&flat_color_shader, "u_color", other_players[i].color.r, other_players[i].color.g, other_players[i].color.b);
+                shader_set_uniform_vec2(&flat_color_shader, "u_position_offset", other_players[i].position.x, other_players[i].position.y);
+
+                glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, NULL);
+            }
+        }
 
         glfwPollEvents();
         glfwSwapBuffers(window);
     }
 
-    running = false;
+    LOG_INFO("client shutting down");
 
+    /* Tell server to remove ourselves from the player list */
+    packet_player_remove_t player_remove_packet = {
+        .id = self_player.id
+    };
+    if (!packet_send(client_socket, PACKET_TYPE_PLAYER_REMOVE, &player_remove_packet)) {
+        LOG_ERROR("failed to send player remove packet");
+    }
+
+    LOG_INFO("removed self from players");
+
+    glDeleteBuffers(1, &vbo);
+    glDeleteVertexArrays(1, &vao);
+
+    shader_destroy(&flat_color_shader);
+
+    LOG_INFO("shutting down glfw");
     glfwDestroyWindow(window);
     glfwTerminate();
 
+    pthread_kill(network_thread, SIGINT);
     pthread_join(network_thread, NULL);
 
     return EXIT_SUCCESS;

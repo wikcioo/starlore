@@ -1,28 +1,73 @@
 #pragma once
 
 #include "defines.h"
+#include "common/maths.h"
 
-#define PACKET_TYPE_NONE 0
-#define PACKET_TYPE_PING 1
-#define PACKET_TYPE_MESSAGE 2
+typedef enum packet_type {
+    PACKET_TYPE_NONE,
+    PACKET_TYPE_HEADER,
+    PACKET_TYPE_PING,
+    PACKET_TYPE_MESSAGE,
+    PACKET_TYPE_PLAYER_INIT,
+    PACKET_TYPE_PLAYER_ADD,
+    PACKET_TYPE_PLAYER_REMOVE,
+    PACKET_TYPE_PLAYER_UPDATE,
+    PACKET_TYPE_COUNT
+} packet_type_e;
 
 #define MAX_AUTHOR_SIZE 32
 #define MAX_CONTENT_SIZE 256
+#define MAX_PLAYER_COUNT 5
 
-typedef struct packet_header
-{
+#define PLAYER_INVALID_ID 0
+
+typedef u32 player_id;
+
+typedef struct packet_header {
     u32 type;
     u32 size;
 } packet_header_t;
 
-typedef struct packet_ping
-{
+typedef struct packet_ping {
     u64 time;
 } packet_ping_t;
 
-typedef struct packet_message
-{
+typedef struct packet_message {
     i64 timestamp;
     char author[MAX_AUTHOR_SIZE];
     char content[MAX_CONTENT_SIZE];
 } packet_message_t;
+
+typedef struct packet_player_init {
+    player_id id;
+    vec2 position;
+    vec3 color;
+} packet_player_init_t;
+
+typedef struct packet_player_add {
+    player_id id;
+    vec2 position;
+    vec3 color;
+} packet_player_add_t;
+
+typedef struct packet_player_remove {
+    player_id id;
+} packet_player_remove_t;
+
+typedef struct packet_player_update {
+    player_id id;
+    vec2 position;
+} packet_player_update_t;
+
+static const u32 PACKET_TYPE_SIZE[PACKET_TYPE_COUNT] = {
+    [PACKET_TYPE_NONE]          = 0,
+    [PACKET_TYPE_HEADER]        = sizeof(packet_header_t),
+    [PACKET_TYPE_PING]          = sizeof(packet_ping_t),
+    [PACKET_TYPE_MESSAGE]       = sizeof(packet_message_t),
+    [PACKET_TYPE_PLAYER_INIT]   = sizeof(packet_player_init_t),
+    [PACKET_TYPE_PLAYER_ADD]    = sizeof(packet_player_add_t),
+    [PACKET_TYPE_PLAYER_REMOVE] = sizeof(packet_player_remove_t),
+    [PACKET_TYPE_PLAYER_UPDATE] = sizeof(packet_player_update_t)
+};
+
+b8 packet_send(i32 socket, u32 type, void *packet_data);
