@@ -6,6 +6,16 @@
 
 static b8 rand_seeded = false;
 
+f32 maths_sinf(f32 value)
+{
+    return sinf(value);
+}
+
+f32 maths_cosf(f32 value)
+{
+    return cosf(value);
+}
+
 i32 maths_random(void)
 {
     if (!rand_seeded) {

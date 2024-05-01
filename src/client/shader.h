@@ -1,6 +1,7 @@
 #pragma once
 
 #include "defines.h"
+#include "common/maths.h"
 
 typedef struct shader
 {
@@ -19,5 +20,6 @@ void shader_destroy(shader_t *shader);
 void shader_bind(shader_t *shader);
 void shader_unbind(shader_t *shader);
 
-void shader_set_uniform_vec2(shader_t *shader, const char *name, f32 x, f32 y);
-void shader_set_uniform_vec3(shader_t *shader, const char *name, f32 x, f32 y, f32 z);
+void shader_set_uniform_vec2(shader_t *shader, const char *name, vec2 *data);
+void shader_set_uniform_vec3(shader_t *shader, const char *name, vec3 *data);
+void shader_set_uniform_mat4(shader_t *shader, const char *name, mat4 *data);

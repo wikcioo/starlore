@@ -43,6 +43,10 @@ static char input_buffer[INPUT_BUFFER_SIZE] = {0};
 static u32 input_count = 0;
 static char username[MAX_AUTHOR_SIZE];
 static b8 running = false;
+static vec2 current_window_size;
+
+static shader_t flat_color_shader;
+static mat4 ortho_projection;
 
 b8 handle_client_validation(i32 client)
 {
@@ -318,6 +322,13 @@ void glfw_error_callback(i32 code, const char *description)
 
 void glfw_framebuffer_size_callback(GLFWwindow* window, i32 width, i32 height)
 {
+    current_window_size = vec2_create((f32)width, (f32)height);
+    ortho_projection = mat4_orthographic(0.0f, current_window_size.x, 0.0f, current_window_size.y, -1.0f, 1.0f);
+
+    shader_bind(&flat_color_shader);
+    shader_set_uniform_mat4(&flat_color_shader, "u_projection", &ortho_projection);
+    shader_unbind(&flat_color_shader);
+
     glViewport(0, 0, width, height);
 }
 
@@ -330,7 +341,7 @@ void glfw_key_callback(GLFWwindow* window, i32 key, i32 scancode, i32 action, i3
     // NOTE: hardcoded velocity, doesn't consider delta time
     // Check for movement
     vec2 movement = vec2_zero();
-    f32 velocity = 0.05f;
+    f32 velocity = 10.0f;
     if (key == GLFW_KEY_W) {  /* Up */
         movement.y += velocity;
     }
@@ -383,9 +394,14 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
+    current_window_size = vec2_create((f32)WINDOW_WIDTH, (f32)WINDOW_HEIGHT);
+    ortho_projection = mat4_orthographic(0.0f, current_window_size.x, 0.0f, current_window_size.y, -1.0f, 1.0f);
+
     glfwMakeContextCurrent(window);
     glfwSetFramebufferSizeCallback(window, glfw_framebuffer_size_callback);
     glfwSetKeyCallback(window, glfw_key_callback);
+
+    glfwSwapInterval(1); // enable vsync
 
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
         LOG_FATAL("failed to load opengl");
@@ -397,8 +413,6 @@ int main(int argc, char *argv[])
     LOG_INFO("running opengl version %d.%d", GLVersion.major, GLVersion.minor);
     LOG_INFO("running glfw version %s", glfwGetVersionString());
 
-    shader_t flat_color_shader;
-
     shader_create_info_t create_info;
     create_info.vertex_filepath = "assets/shaders/flat_color.vert";
     create_info.fragment_filepath = "assets/shaders/flat_color.frag";
@@ -406,12 +420,16 @@ int main(int argc, char *argv[])
     if (shader_create(&create_info, &flat_color_shader)) {
         LOG_INFO("compiled flat_color_shader");
     }
+    shader_bind(&flat_color_shader);
+    shader_set_uniform_mat4(&flat_color_shader, "u_projection", &ortho_projection);
+    shader_unbind(&flat_color_shader);
 
-    f32 vertices[] = {
-        -0.1f, -0.1f,
-        -0.1f,  0.1f,
-         0.1f,  0.1f,
-         0.1f, -0.1f
+    i32 tile_size = 32;
+    f32 vertices[] = { // 32px x 32px square centered around centroid
+        -tile_size / 2.0f, -tile_size / 2.0f,
+        -tile_size / 2.0f,  tile_size / 2.0f,
+         tile_size / 2.0f,  tile_size / 2.0f,
+         tile_size / 2.0f, -tile_size / 2.0f,
     };
 
     u32 indices[] = {
@@ -495,18 +513,43 @@ int main(int argc, char *argv[])
     pthread_t network_thread;
     pthread_create(&network_thread, NULL, handle_networking, NULL);
 
+    f32 rotation_angle = 0.0f;
+    f32 scale_factor = 1.0f;
+
+    f64 last_time = glfwGetTime();
+    f64 delta_time = 0.0f;
+
+    f32 time_accumulator = 0.0f;
+    f32 fps_info_period = 5.0f; // 5 second
+
     while (!glfwWindowShouldClose(window) && running) {
+        f64 now = glfwGetTime();
+        delta_time = now - last_time;
+        last_time = now;
+
+        time_accumulator += delta_time;
+        if (time_accumulator >= fps_info_period) {
+            time_accumulator = 0.0f;
+            LOG_INFO("running at %lf FPS", 1.0f / delta_time);
+        }
+
         glClearColor(0.3f, 0.5f, 0.9f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
 
         shader_bind(&flat_color_shader);
+
         glBindVertexArray(vao);
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo);
 
         if (self_player.id != PLAYER_INVALID_ID) {
             /* Draw ourselves */
-            shader_set_uniform_vec3(&flat_color_shader, "u_color", self_player.color.r, self_player.color.g, self_player.color.b);
-            shader_set_uniform_vec2(&flat_color_shader, "u_position_offset", self_player.position.x, self_player.position.y);
+            mat4 translation = mat4_translate(self_player.position);
+            mat4 rotation = mat4_rotate(rotation_angle);
+            mat4 scale = mat4_scale(vec2_create(scale_factor, scale_factor));
+            mat4 model = mat4_multiply(translation, mat4_multiply(rotation, scale));
+
+            shader_set_uniform_mat4(&flat_color_shader, "u_model", &model);
+            shader_set_uniform_vec3(&flat_color_shader, "u_color", &self_player.color);
 
             glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, NULL);
         }
@@ -514,8 +557,13 @@ int main(int argc, char *argv[])
         /* Draw all other players */
         for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
             if (other_players[i].id != PLAYER_INVALID_ID) {
-                shader_set_uniform_vec3(&flat_color_shader, "u_color", other_players[i].color.r, other_players[i].color.g, other_players[i].color.b);
-                shader_set_uniform_vec2(&flat_color_shader, "u_position_offset", other_players[i].position.x, other_players[i].position.y);
+                mat4 translation = mat4_translate(other_players[i].position);
+                mat4 rotation = mat4_rotate(rotation_angle);
+                mat4 scale = mat4_scale(vec2_create(scale_factor, scale_factor));
+                mat4 model = mat4_multiply(translation, mat4_multiply(rotation, scale));
+
+                shader_set_uniform_mat4(&flat_color_shader, "u_model", &model);
+                shader_set_uniform_vec3(&flat_color_shader, "u_color", &other_players[i].color);
 
                 glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, NULL);
             }

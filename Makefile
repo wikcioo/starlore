@@ -36,10 +36,10 @@ server:
 	@make --no-print-directory $(BUILD_DIR)/server/server
 
 $(BUILD_DIR)/client/client: $(CLIENT_OBJECTS) $(COMMON_OBJECTS)
-	$(CC) $^ -lglfw -o $@
+	$(CC) $^ -lglfw -lm -o $@
 
 $(BUILD_DIR)/server/server: $(SERVER_OBJECTS) $(COMMON_OBJECTS)
-	$(CC) $^ -o $@
+	$(CC) $^ -lm -o $@
 
 $(BUILD_DIR)/client/%.c.o: $(CLIENT_DIR)/%.c
 	$(CC) -c $(WARNINGS) $(CFLAGS) -I$(SRC_DIR) -I$(VENDOR_DIR)/glad/include $^ -o $@
