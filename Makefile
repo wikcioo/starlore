@@ -1,8 +1,12 @@
+ifndef config
+    config=debug
+endif
+
 CC := clang
 
 WARNINGS := -Wall -Wpedantic -Wshadow -Wno-gnu-zero-variadic-macro-arguments
 
-BUILD_DIR  := build
+BUILD_DIR  := build/$(config)
 SRC_DIR    := src
 CLIENT_DIR := src/client
 SERVER_DIR := src/server
@@ -18,20 +22,25 @@ CLIENT_OBJECTS := $(addprefix $(BUILD_DIR)/client/, $(addsuffix .c.o, $(basename
 SERVER_OBJECTS := $(addprefix $(BUILD_DIR)/server/, $(addsuffix .c.o, $(basename $(notdir $(SERVER_SOURCES)))))
 COMMON_OBJECTS := $(addprefix $(BUILD_DIR)/common/, $(addsuffix .c.o, $(basename $(notdir $(COMMON_SOURCES)))))
 
-CFLAGS := -DDEBUG -DENABLE_ASSERTIONS -g
+ifeq ($(config), debug)
+    CFLAGS := -DDEBUG -DENABLE_ASSERTIONS -g
+endif
+ifeq ($(config), release)
+    CFLAGS := -DNDEBUG -O3
+endif
 
 all:
-	@echo "Building all..."
+	@echo "($(config)) Building all..."
 	@make --no-print-directory client
 	@make --no-print-directory server
 
 client:
-	@echo "Building client..."
+	@echo "($(config)) Building client..."
 	@mkdir -p $(BUILD_DIR)/client $(BUILD_DIR)/common
 	@make --no-print-directory $(BUILD_DIR)/client/client
 
 server:
-	@echo "Building server..."
+	@echo "($(config)) Building server..."
 	@mkdir -p $(BUILD_DIR)/server $(BUILD_DIR)/common
 	@make --no-print-directory $(BUILD_DIR)/server/server
 
