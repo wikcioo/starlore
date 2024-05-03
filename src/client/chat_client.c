@@ -149,7 +149,6 @@ void handle_stdin_event(void)
 
 void handle_socket_event(void)
 {
-    #define INPUT_BUFFER_SIZE 1024
     u8 recv_buffer[INPUT_BUFFER_SIZE] = {0};
 
     i64 bytes_read = recv(client_socket, &recv_buffer, INPUT_BUFFER_SIZE, 0);
@@ -165,7 +164,7 @@ void handle_socket_event(void)
     }
 
     if (bytes_read < PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]) { /* Check if at least 'header' amount of bytes were read */
-        LOG_WARN("unimplemented"); /* TODO: Handle the case of having read less than header size */
+        LOG_WARN("unimplemented: read less bytes than the header size"); /* TODO: Handle the case of having read less than header size */
     } else {
         /* Check if multiple packets included in single tcp data reception */
         u8 *buffer = recv_buffer;
@@ -173,7 +172,8 @@ void handle_socket_event(void)
             packet_header_t *header = (packet_header_t *)buffer;
 
             if (bytes_read - PACKET_TYPE_SIZE[PACKET_TYPE_HEADER] < header->size) {
-                LOG_WARN("unimplemented"); /* TODO: Handle the case of not having read the entire packet body */
+                LOG_WARN("unimplemented: not read the entire packet body"); /* TODO: Handle the case of not having read the entire packet body */
+                break;
             } else {
                 u32 received_data_size = 0;
                 switch (header->type) {
@@ -530,7 +530,7 @@ int main(int argc, char *argv[])
         time_accumulator += delta_time;
         if (time_accumulator >= fps_info_period) {
             time_accumulator = 0.0f;
-            LOG_INFO("running at %lf FPS", 1.0f / delta_time);
+            // LOG_INFO("running at %lf FPS", 1.0f / delta_time);
         }
 
         glClearColor(0.3f, 0.5f, 0.9f, 1.0f);

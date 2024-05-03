@@ -6,6 +6,7 @@
 #define INLINE static inline
 
 #define BIT(x) (1 << (x))
+#define UNUSED(x) (void)x
 
 #if defined(__clang__) || defined(__GNUC__)
     #define STATIC_ASSERT _Static_assert
