@@ -17,12 +17,16 @@
 
 #include "defines.h"
 #include "shader.h"
+#include "common/config.h"
 #include "common/packet.h"
 #include "common/logger.h"
 #include "common/maths.h"
+#include "common/input_codes.h"
+#include "common/containers/ring_buffer.h"
 
 #define POLLFD_COUNT 2
 #define INPUT_BUFFER_SIZE 1024
+#define RING_BUFFER_CAPACITY 256
 #define POLL_INFINITE_TIMEOUT -1
 
 #define WINDOW_WIDTH 1280
@@ -44,6 +48,8 @@ static u32 input_count = 0;
 static char username[MAX_AUTHOR_SIZE];
 static b8 running = false;
 static vec2 current_window_size;
+static void *ring_buffer;
+static u32 current_sequence_number = 1;
 
 static shader_t flat_color_shader;
 static mat4 ortho_projection;
@@ -255,6 +261,41 @@ void handle_socket_event(void)
                     case PACKET_TYPE_PLAYER_UPDATE: {
                         received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_PLAYER_UPDATE];
                         packet_player_update_t *player_update = (packet_player_update_t *)(buffer + PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]);
+
+                        if (player_update->id == self_player.id) {
+                            for (;;) {
+                                b8 dequeue_status;
+                                packet_player_keypress_t keypress = {0};
+
+                                ring_buffer_dequeue(ring_buffer, &keypress, &dequeue_status);
+                                if (!dequeue_status) {
+                                    LOG_WARN("ran out of keypresses and did not find appropriate sequence number");
+                                    break;
+                                }
+
+                                if (keypress.seq_nr == player_update->seq_nr) {
+                                    // Got authoritative position update from the server, so update self_player position received from the server
+                                    // and re-apply all keypresses that happened since then
+                                    self_player.position = player_update->position;
+
+                                    u32 nth_element = 0;
+                                    while (ring_buffer_peek_from_end(ring_buffer, nth_element++, &keypress)) {
+                                        if (keypress.key == KEYCODE_W) {
+                                            self_player.position.y += PLAYER_VELOCITY;
+                                        } else if (keypress.key == KEYCODE_S) {
+                                            self_player.position.y -= PLAYER_VELOCITY;
+                                        } else if (keypress.key == KEYCODE_A) {
+                                            self_player.position.x -= PLAYER_VELOCITY;
+                                        } else if (keypress.key == KEYCODE_D) {
+                                            self_player.position.x += PLAYER_VELOCITY;
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
+                            break;
+                        }
+
                         b8 found_player_to_update = false;
                         for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
                             if (other_players[i].id == player_update->id) {
@@ -337,32 +378,41 @@ void glfw_key_callback(GLFWwindow* window, i32 key, i32 scancode, i32 action, i3
     if (key == GLFW_KEY_P && action == GLFW_PRESS)
         send_ping_packet();
 
-    // TODO: remove temporary code
-    // NOTE: hardcoded velocity, doesn't consider delta time
-    // Check for movement
-    vec2 movement = vec2_zero();
-    f32 velocity = 10.0f;
-    if (key == GLFW_KEY_W) {  /* Up */
-        movement.y += velocity;
-    }
-    if (key == GLFW_KEY_S) { /* Down */
-        movement.y -= velocity;
-    }
-    if (key == GLFW_KEY_A) { /* Left */
-        movement.x -= velocity;
-    }
-    if (key == GLFW_KEY_D) { /* Right */
-        movement.x += velocity;
-    }
+    if (key == GLFW_KEY_W || key == GLFW_KEY_S || key == GLFW_KEY_A || key == GLFW_KEY_D) {
+        packet_player_keypress_t player_keypress_packet = {
+            .seq_nr = current_sequence_number++,
+            .key = key,
+            .action = action
+        };
 
-    self_player.position = vec2_add(self_player.position, movement);
+        { // client-side prediction
+            vec2 movement = vec2_zero();
+            if (key == GLFW_KEY_W) {
+                movement.y += PLAYER_VELOCITY;
+            }
+            if (key == GLFW_KEY_S) {
+                movement.y -= PLAYER_VELOCITY;
+            }
+            if (key == GLFW_KEY_A) {
+                movement.x -= PLAYER_VELOCITY;
+            }
+            if (key == GLFW_KEY_D) {
+                movement.x += PLAYER_VELOCITY;
+            }
 
-    packet_player_update_t player_update_packet = {
-        .id       = self_player.id,
-        .position = self_player.position
-    };
-    if (!packet_send(client_socket, PACKET_TYPE_PLAYER_UPDATE, &player_update_packet)) {
-        LOG_ERROR("failed to send player update packet");
+            self_player.position = vec2_add(self_player.position, movement);
+        }
+
+        b8 enqueue_status;
+        ring_buffer_enqueue(ring_buffer, player_keypress_packet, &enqueue_status);
+        if (!enqueue_status) {
+            LOG_ERROR("failed to enqueue player keypress packet");
+            return;
+        }
+
+        if (!packet_send(client_socket, PACKET_TYPE_PLAYER_KEYPRESS, &player_keypress_packet)) {
+            LOG_ERROR("failed to send player keypress packet");
+        }
     }
 }
 
@@ -510,6 +560,8 @@ int main(int argc, char *argv[])
     sa.sa_handler = &signal_handler;
     sigaction(SIGINT, &sa, NULL);
 
+    ring_buffer = ring_buffer_reserve(RING_BUFFER_CAPACITY, sizeof(packet_player_keypress_t));
+
     pthread_t network_thread;
     pthread_create(&network_thread, NULL, handle_networking, NULL);
 
@@ -596,6 +648,9 @@ int main(int argc, char *argv[])
 
     pthread_kill(network_thread, SIGINT);
     pthread_join(network_thread, NULL);
+
+    ring_buffer_destroy(ring_buffer);
+    LOG_TRACE("destroyed ring buffer");
 
     return EXIT_SUCCESS;
 }

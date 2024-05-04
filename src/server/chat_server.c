@@ -13,10 +13,12 @@
 #include <signal.h>
 
 #include "defines.h"
+#include "common/config.h"
 #include "common/packet.h"
 #include "common/logger.h"
 #include "common/asserts.h"
 #include "common/maths.h"
+#include "common/input_codes.h"
 
 #define INPUT_BUFFER_SIZE 1024
 #define INPUT_OVERFLOW_BUFFER_SIZE 256
@@ -370,6 +372,46 @@ void handle_packet_type(i32 client_socket, u8 *packet_body_buffer, u32 type, u32
                     if (players[i].id != PLAYER_INVALID_ID && players[i].id != update->id) {
                         if (!packet_send(players[i].socket, PACKET_TYPE_PLAYER_UPDATE, update)) {
                             LOG_ERROR("failed to send player update packet to player with id=%u", players[i].id);
+                        }
+                    }
+                }
+            }
+        } break;
+        case PACKET_TYPE_PLAYER_KEYPRESS: {
+            received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_PLAYER_KEYPRESS];
+            packet_player_keypress_t *keypress = (packet_player_keypress_t *)packet_body_buffer;
+
+            if (keypress->key == KEYCODE_W || keypress->key == KEYCODE_S || keypress->key == KEYCODE_A || keypress->key == KEYCODE_D) {
+                // Update player position and send updates to all players including the sender
+                i32 sender_idx = -1;
+                for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
+                    if (players[i].socket == client_socket) {
+                        sender_idx = i;
+                    }
+                }
+
+                ASSERT(sender_idx != -1);
+
+                if (keypress->key == KEYCODE_W) {
+                    players[sender_idx].position.y += PLAYER_VELOCITY;
+                } else if (keypress->key == KEYCODE_S) {
+                    players[sender_idx].position.y -= PLAYER_VELOCITY;
+                } else if (keypress->key == KEYCODE_A) {
+                    players[sender_idx].position.x -= PLAYER_VELOCITY;
+                } else if (keypress->key == KEYCODE_D) {
+                    players[sender_idx].position.x += PLAYER_VELOCITY;
+                }
+
+                packet_player_update_t player_update_packet = {
+                    .seq_nr = keypress->seq_nr,
+                    .id = players[sender_idx].id,
+                    .position = players[sender_idx].position
+                };
+
+                for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
+                    if (players[i].id != PLAYER_INVALID_ID) {
+                        if (!packet_send(players[i].socket, PACKET_TYPE_PLAYER_UPDATE, &player_update_packet)) {
+                            LOG_ERROR("failed to send player update packet");
                         }
                     }
                 }

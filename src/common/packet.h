@@ -12,6 +12,7 @@ typedef enum packet_type {
     PACKET_TYPE_PLAYER_ADD,
     PACKET_TYPE_PLAYER_REMOVE,
     PACKET_TYPE_PLAYER_UPDATE,
+    PACKET_TYPE_PLAYER_KEYPRESS,
     PACKET_TYPE_COUNT
 } packet_type_e;
 
@@ -55,19 +56,27 @@ typedef struct packet_player_remove {
 } packet_player_remove_t;
 
 typedef struct packet_player_update {
+    u32 seq_nr;
     player_id id;
     vec2 position;
 } packet_player_update_t;
 
+typedef struct packet_player_keypress {
+    u32 seq_nr;
+    i32 key;
+    i32 action;
+} packet_player_keypress_t;
+
 static const u32 PACKET_TYPE_SIZE[PACKET_TYPE_COUNT] = {
-    [PACKET_TYPE_NONE]          = 0,
-    [PACKET_TYPE_HEADER]        = sizeof(packet_header_t),
-    [PACKET_TYPE_PING]          = sizeof(packet_ping_t),
-    [PACKET_TYPE_MESSAGE]       = sizeof(packet_message_t),
-    [PACKET_TYPE_PLAYER_INIT]   = sizeof(packet_player_init_t),
-    [PACKET_TYPE_PLAYER_ADD]    = sizeof(packet_player_add_t),
-    [PACKET_TYPE_PLAYER_REMOVE] = sizeof(packet_player_remove_t),
-    [PACKET_TYPE_PLAYER_UPDATE] = sizeof(packet_player_update_t)
+    [PACKET_TYPE_NONE]              = 0,
+    [PACKET_TYPE_HEADER]            = sizeof(packet_header_t),
+    [PACKET_TYPE_PING]              = sizeof(packet_ping_t),
+    [PACKET_TYPE_MESSAGE]           = sizeof(packet_message_t),
+    [PACKET_TYPE_PLAYER_INIT]       = sizeof(packet_player_init_t),
+    [PACKET_TYPE_PLAYER_ADD]        = sizeof(packet_player_add_t),
+    [PACKET_TYPE_PLAYER_REMOVE]     = sizeof(packet_player_remove_t),
+    [PACKET_TYPE_PLAYER_UPDATE]     = sizeof(packet_player_update_t),
+    [PACKET_TYPE_PLAYER_KEYPRESS]   = sizeof(packet_player_keypress_t)
 };
 
 b8 packet_send(i32 socket, u32 type, void *packet_data);
