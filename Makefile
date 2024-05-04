@@ -4,7 +4,7 @@ endif
 
 CC := clang
 
-WARNINGS := -Wall -Wpedantic -Wshadow -Wno-gnu-zero-variadic-macro-arguments
+WARNINGS := -Wall -Wpedantic -Wshadow -Wno-gnu-zero-variadic-macro-arguments -Wno-language-extension-token
 
 BUILD_DIR  := build/$(config)
 SRC_DIR    := src
@@ -17,6 +17,7 @@ CLIENT_SOURCES := $(wildcard $(CLIENT_DIR)/*.c)
 CLIENT_SOURCES += $(wildcard $(VENDOR_DIR)/glad/src/*.c)
 SERVER_SOURCES := $(wildcard $(SERVER_DIR)/*.c)
 COMMON_SOURCES := $(wildcard $(COMMON_DIR)/*.c)
+COMMON_SOURCES += $(wildcard $(COMMON_DIR)/containers/*.c)
 
 CLIENT_OBJECTS := $(addprefix $(BUILD_DIR)/client/, $(addsuffix .c.o, $(basename $(notdir $(CLIENT_SOURCES)))))
 SERVER_OBJECTS := $(addprefix $(BUILD_DIR)/server/, $(addsuffix .c.o, $(basename $(notdir $(SERVER_SOURCES)))))
@@ -60,6 +61,9 @@ $(BUILD_DIR)/server/%.c.o: $(SERVER_DIR)/%.c
 	$(CC) -c $(WARNINGS) $(CFLAGS) -I$(SRC_DIR) $^ -o $@
 
 $(BUILD_DIR)/common/%.c.o: $(COMMON_DIR)/%.c
+	$(CC) -c $(WARNINGS) $(CFLAGS) -I$(SRC_DIR) $^ -o $@
+
+$(BUILD_DIR)/common/%.c.o: $(COMMON_DIR)/containers/%.c
 	$(CC) -c $(WARNINGS) $(CFLAGS) -I$(SRC_DIR) $^ -o $@
 
 clean:

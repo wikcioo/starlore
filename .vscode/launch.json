@@ -20,6 +20,15 @@
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": []
+        },
+        {
+            "name": "Launch Tests (Linux)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/build/test_suite",
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": []
         }
     ]
 }
