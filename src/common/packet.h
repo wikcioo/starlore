@@ -62,6 +62,7 @@ typedef struct packet_player_update {
 } packet_player_update_t;
 
 typedef struct packet_player_keypress {
+    player_id id;
     u32 seq_nr;
     i32 key;
     i32 action;

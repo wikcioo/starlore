@@ -380,6 +380,7 @@ void glfw_key_callback(GLFWwindow* window, i32 key, i32 scancode, i32 action, i3
 
     if (key == GLFW_KEY_W || key == GLFW_KEY_S || key == GLFW_KEY_A || key == GLFW_KEY_D) {
         packet_player_keypress_t player_keypress_packet = {
+            .id = self_player.id,
             .seq_nr = current_sequence_number++,
             .key = key,
             .action = action

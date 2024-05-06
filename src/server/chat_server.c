@@ -11,6 +11,7 @@
 #include <time.h>
 #include <errno.h>
 #include <signal.h>
+#include <pthread.h>
 
 #include "defines.h"
 #include "common/config.h"
@@ -19,11 +20,16 @@
 #include "common/asserts.h"
 #include "common/maths.h"
 #include "common/input_codes.h"
+#include "common/containers/ring_buffer.h"
 
 #define INPUT_BUFFER_SIZE 1024
 #define INPUT_OVERFLOW_BUFFER_SIZE 256
 
 #define SERVER_BACKLOG 10
+#define UPDATE_TIME_STEP_FREQ 64
+#define INPUT_RING_BUFFER_CAPACITY 256
+#define PROCESSED_INPUT_LIMIT_PER_UPDATE 256
+
 #define POLL_INFINITE_TIMEOUT -1
 
 typedef struct server_pfd {
@@ -35,6 +41,7 @@ typedef struct server_pfd {
 typedef struct player {
     i32 socket;
     player_id id;
+    u32 seq_nr;
     vec2 position;
     vec3 color;
 } player_t;
@@ -44,6 +51,7 @@ static i32 server_socket;
 static server_pfd_t fds;
 static player_t players[MAX_PLAYER_COUNT];
 static player_id current_player_id = 1000;
+static void *input_ring_buffer;
 
 void server_pfd_init(u32 initial_capacity, server_pfd_t *out_server_pfd)
 {
@@ -381,40 +389,10 @@ void handle_packet_type(i32 client_socket, u8 *packet_body_buffer, u32 type, u32
             received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_PLAYER_KEYPRESS];
             packet_player_keypress_t *keypress = (packet_player_keypress_t *)packet_body_buffer;
 
-            if (keypress->key == KEYCODE_W || keypress->key == KEYCODE_S || keypress->key == KEYCODE_A || keypress->key == KEYCODE_D) {
-                // Update player position and send updates to all players including the sender
-                i32 sender_idx = -1;
-                for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
-                    if (players[i].socket == client_socket) {
-                        sender_idx = i;
-                    }
-                }
-
-                ASSERT(sender_idx != -1);
-
-                if (keypress->key == KEYCODE_W) {
-                    players[sender_idx].position.y += PLAYER_VELOCITY;
-                } else if (keypress->key == KEYCODE_S) {
-                    players[sender_idx].position.y -= PLAYER_VELOCITY;
-                } else if (keypress->key == KEYCODE_A) {
-                    players[sender_idx].position.x -= PLAYER_VELOCITY;
-                } else if (keypress->key == KEYCODE_D) {
-                    players[sender_idx].position.x += PLAYER_VELOCITY;
-                }
-
-                packet_player_update_t player_update_packet = {
-                    .seq_nr = keypress->seq_nr,
-                    .id = players[sender_idx].id,
-                    .position = players[sender_idx].position
-                };
-
-                for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
-                    if (players[i].id != PLAYER_INVALID_ID) {
-                        if (!packet_send(players[i].socket, PACKET_TYPE_PLAYER_UPDATE, &player_update_packet)) {
-                            LOG_ERROR("failed to send player update packet");
-                        }
-                    }
-                }
+            b8 enqueue_status;
+            ring_buffer_enqueue(input_ring_buffer, *keypress, &enqueue_status);
+            if (!enqueue_status) {
+                LOG_ERROR("failed to enqueue new player input");
             }
         } break;
         default:
@@ -500,6 +478,85 @@ void signal_handler(i32 sig)
     running = false;
 }
 
+void process_pending_input(void)
+{
+    b8 dequeue_status;
+    u32 processed_input_count = 0;
+    packet_player_keypress_t keypress;
+    u32 modified_players[MAX_PLAYER_COUNT] = {0};
+
+    for (;;) {
+        ring_buffer_dequeue(input_ring_buffer, &keypress, &dequeue_status);
+        if (!dequeue_status) {
+            break; // Finished processing all input from the queue
+        }
+
+        if (keypress.key == KEYCODE_W || keypress.key == KEYCODE_S || keypress.key == KEYCODE_A || keypress.key == KEYCODE_D) {
+            i32 sender_idx = -1;
+            for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
+                if (players[i].id == keypress.id) {
+                    sender_idx = i;
+                    break;
+                }
+            }
+
+            ASSERT(sender_idx != -1);
+
+            if (keypress.key == KEYCODE_W) {
+                players[sender_idx].position.y += PLAYER_VELOCITY;
+            } else if (keypress.key == KEYCODE_S) {
+                players[sender_idx].position.y -= PLAYER_VELOCITY;
+            } else if (keypress.key == KEYCODE_A) {
+                players[sender_idx].position.x -= PLAYER_VELOCITY;
+            } else if (keypress.key == KEYCODE_D) {
+                players[sender_idx].position.x += PLAYER_VELOCITY;
+            }
+
+            players[sender_idx].seq_nr = keypress.seq_nr;
+            if (modified_players[sender_idx] == 0) {
+                modified_players[sender_idx] = 1;
+            }
+        }
+
+        processed_input_count++;
+        if (processed_input_count >= PROCESSED_INPUT_LIMIT_PER_UPDATE) {
+            break;
+        }
+    }
+
+    for (u64 i = 0; i < MAX_PLAYER_COUNT; i++) {
+        if (modified_players[i] == 0) {
+            continue;
+        }
+
+        // Send updated players' state to all other players including the sender
+        packet_player_update_t player_update_packet = {
+            .seq_nr = players[i].seq_nr,
+            .id = players[i].id,
+            .position = players[i].position
+        };
+
+        for (i32 j = 0; j < MAX_PLAYER_COUNT; j++) {
+            if (players[j].id != PLAYER_INVALID_ID) {
+                if (!packet_send(players[j].socket, PACKET_TYPE_PLAYER_UPDATE, &player_update_packet)) {
+                    LOG_ERROR("failed to send player update packet");
+                }
+            }
+        }
+    }
+}
+
+void *process_input_queue(void *args)
+{
+    static const u32 us_to_sleep = 1.0f / UPDATE_TIME_STEP_FREQ * 1000 * 1000;
+    while (running) {
+        process_pending_input();
+        usleep(us_to_sleep);
+    }
+
+    return NULL;
+}
+
 int main(int argc, char *argv[])
 {
     if (argc != 2) {
@@ -570,12 +627,17 @@ int main(int argc, char *argv[])
     server_pfd_init(5, &fds);
     server_pfd_add(&fds, server_socket);
 
+    input_ring_buffer = ring_buffer_reserve(INPUT_RING_BUFFER_CAPACITY, sizeof(packet_player_keypress_t));
+
     struct sigaction sa = {0};
     sa.sa_flags = SA_RESTART; // Restart functions interruptable by EINTR like poll()
     sa.sa_handler = &signal_handler;
     sigaction(SIGINT, &sa, NULL);
 
     running = true;
+
+    pthread_t input_queue_processing_thread;
+    pthread_create(&input_queue_processing_thread, NULL, process_input_queue, NULL);
 
     while (running) {
         i32 num_events = poll(fds.fds, fds.count, POLL_INFINITE_TIMEOUT);
@@ -603,6 +665,9 @@ int main(int argc, char *argv[])
     LOG_INFO("server shutting down");
 
     server_pfd_shutdown(&fds);
+
+    pthread_join(input_queue_processing_thread, NULL);
+    LOG_INFO("shut down input queue processing thread");
 
     if (close(server_socket) == -1) {
         LOG_ERROR("error while closing the socket: %s", strerror(errno));
