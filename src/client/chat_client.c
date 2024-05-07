@@ -29,18 +29,29 @@
 #define RING_BUFFER_CAPACITY 256
 #define POLL_INFINITE_TIMEOUT -1
 
+#define CLIENT_TICK_RATE 64
+#define CLIENT_TICK_DURATION (1.0f / CLIENT_TICK_RATE)
+
+#define SERVER_TICK_DURATION (1.0f / SERVER_TICK_RATE)
+
 #define WINDOW_WIDTH 1280
 #define WINDOW_HEIGHT 720
+
+#define VSYNC_ENABLED 1
 
 typedef struct player {
     player_id id;
     vec2 position;
+    vec2 last_position; // Used for interpolation
+    b8 interp_complete;
     vec3 color;
 } player_t;
 
 static u32 other_player_count = 0;
 static player_t other_players[MAX_PLAYER_COUNT];
+static f32 server_update_accumulator = 0.0f;
 static player_t self_player;
+static b8 keys[KEYCODE_Last];
 static struct pollfd pfds[POLLFD_COUNT];
 static i32 client_socket;
 static char input_buffer[INPUT_BUFFER_SIZE] = {0};
@@ -229,9 +240,11 @@ void handle_socket_event(void)
                         for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
                             if (other_players[i].id == PLAYER_INVALID_ID) { /* Free slot */
                                 LOG_INFO("adding new player id=%u", player_add->id);
-                                other_players[i].id       = player_add->id;
-                                other_players[i].position = player_add->position;
-                                other_players[i].color    = player_add->color;
+                                other_players[i].id              = player_add->id;
+                                other_players[i].position        = player_add->position;
+                                other_players[i].color           = player_add->color;
+                                other_players[i].last_position   = player_add->position;
+                                other_players[i].interp_complete = true;
                                 other_player_count++;
                                 found_free_slot = true;
                                 break;
@@ -299,8 +312,11 @@ void handle_socket_event(void)
                         b8 found_player_to_update = false;
                         for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
                             if (other_players[i].id == player_update->id) {
+                                other_players[i].last_position = other_players[i].position;
                                 other_players[i].position = player_update->position;
+                                other_players[i].interp_complete = false;
                                 found_player_to_update = true;
+                                server_update_accumulator = 0.0f;
                                 break;
                             }
                         }
@@ -378,31 +394,47 @@ void glfw_key_callback(GLFWwindow* window, i32 key, i32 scancode, i32 action, i3
     if (key == GLFW_KEY_P && action == GLFW_PRESS)
         send_ping_packet();
 
-    if (key == GLFW_KEY_W || key == GLFW_KEY_S || key == GLFW_KEY_A || key == GLFW_KEY_D) {
-        packet_player_keypress_t player_keypress_packet = {
-            .id = self_player.id,
-            .seq_nr = current_sequence_number++,
-            .key = key,
-            .action = action
-        };
+    keys[key] = action;
+}
+
+void update_self_player(f64 delta_time)
+{
+    if (keys[KEYCODE_W] || keys[KEYCODE_S] || keys[KEYCODE_A] || keys[KEYCODE_D]) {
+        i32 key = 0;
+        if (keys[KEYCODE_W]) {
+            key = KEYCODE_W;
+        } else if (keys[KEYCODE_S]) {
+            key = KEYCODE_S;
+        } else if (keys[KEYCODE_A]) {
+            key = KEYCODE_A;
+        } else if (keys[KEYCODE_D]) {
+            key = KEYCODE_D;
+        }
 
         { // client-side prediction
             vec2 movement = vec2_zero();
-            if (key == GLFW_KEY_W) {
+            if (key == KEYCODE_W) {
                 movement.y += PLAYER_VELOCITY;
             }
-            if (key == GLFW_KEY_S) {
+            if (key == KEYCODE_S) {
                 movement.y -= PLAYER_VELOCITY;
             }
-            if (key == GLFW_KEY_A) {
+            if (key == KEYCODE_A) {
                 movement.x -= PLAYER_VELOCITY;
             }
-            if (key == GLFW_KEY_D) {
+            if (key == KEYCODE_D) {
                 movement.x += PLAYER_VELOCITY;
             }
 
             self_player.position = vec2_add(self_player.position, movement);
         }
+
+        packet_player_keypress_t player_keypress_packet = {
+            .id = self_player.id,
+            .seq_nr = current_sequence_number++,
+            .key = key,
+            .action = KEYACTION_Press
+        };
 
         b8 enqueue_status;
         ring_buffer_enqueue(ring_buffer, player_keypress_packet, &enqueue_status);
@@ -452,7 +484,7 @@ int main(int argc, char *argv[])
     glfwSetFramebufferSizeCallback(window, glfw_framebuffer_size_callback);
     glfwSetKeyCallback(window, glfw_key_callback);
 
-    glfwSwapInterval(1); // enable vsync
+    glfwSwapInterval(VSYNC_ENABLED);
 
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
         LOG_FATAL("failed to load opengl");
@@ -461,8 +493,15 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
+    const GLFWvidmode *vidmode = glfwGetVideoMode(glfwGetPrimaryMonitor());
+    LOG_INFO("primary monitor parameters:\n\t  width: %d\n\t  height: %d\n\t  refresh rate: %d",
+             vidmode->width, vidmode->height, vidmode->refreshRate);
+
+    LOG_INFO("graphics info:\n\t  vendor: %s\n\t  renderer: %s\n\t  version: %s",
+             glGetString(GL_VENDOR), glGetString(GL_RENDERER), glGetString(GL_VERSION));
     LOG_INFO("running opengl version %d.%d", GLVersion.major, GLVersion.minor);
     LOG_INFO("running glfw version %s", glfwGetVersionString());
+    LOG_INFO("vsync: %s", VSYNC_ENABLED ? "on" : "off");
 
     shader_create_info_t create_info;
     create_info.vertex_filepath = "assets/shaders/flat_color.vert";
@@ -572,18 +611,21 @@ int main(int argc, char *argv[])
     f64 last_time = glfwGetTime();
     f64 delta_time = 0.0f;
 
-    f32 time_accumulator = 0.0f;
-    f32 fps_info_period = 5.0f; // 5 second
+    f64 client_update_accumulator = 0.0f;
+
+    LOG_INFO("server tick rate: %u", SERVER_TICK_RATE);
 
     while (!glfwWindowShouldClose(window) && running) {
         f64 now = glfwGetTime();
         delta_time = now - last_time;
         last_time = now;
 
-        time_accumulator += delta_time;
-        if (time_accumulator >= fps_info_period) {
-            time_accumulator = 0.0f;
-            // LOG_INFO("running at %lf FPS", 1.0f / delta_time);
+        server_update_accumulator += delta_time;
+        client_update_accumulator += delta_time;
+
+        if (client_update_accumulator >= CLIENT_TICK_DURATION) {
+            update_self_player(delta_time);
+            client_update_accumulator = 0.0f;
         }
 
         glClearColor(0.3f, 0.5f, 0.9f, 1.0f);
@@ -608,9 +650,28 @@ int main(int argc, char *argv[])
         }
 
         /* Draw all other players */
+        f32 server_update_accumulator_copy = server_update_accumulator;
         for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
             if (other_players[i].id != PLAYER_INVALID_ID) {
-                mat4 translation = mat4_translate(other_players[i].position);
+                mat4 translation;
+                if (!other_players[i].interp_complete) {
+                    // Interpolate player's position based on the current and last position and time since last server update
+                    f32 t = server_update_accumulator_copy / SERVER_TICK_DURATION;
+                    if (t > 1.0f) {
+                        t = 1.0f;
+                        other_players[i].interp_complete = true;
+                    }
+
+                    vec2 player_position = {
+                        .x = maths_lerpf(other_players[i].last_position.x, other_players[i].position.x, t),
+                        .y = maths_lerpf(other_players[i].last_position.y, other_players[i].position.y, t)
+                    };
+
+                    translation = mat4_translate(player_position);
+                } else {
+                    translation = mat4_translate(other_players[i].position);
+                }
+
                 mat4 rotation = mat4_rotate(rotation_angle);
                 mat4 scale = mat4_scale(vec2_create(scale_factor, scale_factor));
                 mat4 model = mat4_multiply(translation, mat4_multiply(rotation, scale));

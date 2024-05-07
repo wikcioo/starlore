@@ -52,6 +52,10 @@ f32 maths_frandom(void);
 /* min is inclusive, max is exclusive */
 f32 maths_frandom_range(f32 min, f32 max);
 
+INLINE f32 maths_lerpf(f32 value_0, f32 value_1, f32 t) {
+    return value_0 + t * (value_1 - value_0);
+}
+
 INLINE vec2 vec2_zero(void)
 {
     return (vec2) {

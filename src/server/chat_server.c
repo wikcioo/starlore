@@ -26,7 +26,6 @@
 #define INPUT_OVERFLOW_BUFFER_SIZE 256
 
 #define SERVER_BACKLOG 10
-#define UPDATE_TIME_STEP_FREQ 64
 #define INPUT_RING_BUFFER_CAPACITY 256
 #define PROCESSED_INPUT_LIMIT_PER_UPDATE 256
 
@@ -548,7 +547,7 @@ void process_pending_input(void)
 
 void *process_input_queue(void *args)
 {
-    static const u32 us_to_sleep = 1.0f / UPDATE_TIME_STEP_FREQ * 1000 * 1000;
+    static const u32 us_to_sleep = 1.0f / SERVER_TICK_RATE * 1000 * 1000;
     while (running) {
         process_pending_input();
         usleep(us_to_sleep);
@@ -638,6 +637,8 @@ int main(int argc, char *argv[])
 
     pthread_t input_queue_processing_thread;
     pthread_create(&input_queue_processing_thread, NULL, process_input_queue, NULL);
+
+    LOG_INFO("server tick rate: %u", SERVER_TICK_RATE);
 
     while (running) {
         i32 num_events = poll(fds.fds, fds.count, POLL_INFINITE_TIMEOUT);
