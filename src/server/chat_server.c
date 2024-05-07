@@ -253,7 +253,7 @@ b8 receive_client_data(i32 client_socket, u8 *recv_buffer, u32 buffer_size, i64 
     ASSERT(recv_buffer);
     ASSERT(bytes_read);
 
-    *bytes_read = recv(client_socket, recv_buffer, INPUT_BUFFER_SIZE, 0);
+    *bytes_read = recv(client_socket, recv_buffer, buffer_size, 0);
     if (*bytes_read <= 0) {
         if (*bytes_read == -1) {
             LOG_ERROR("recv error: %s", strerror(errno));
@@ -656,6 +656,7 @@ int main(int argc, char *argv[])
             if (fds.fds[i].revents & POLLIN) {
                 if (fds.fds[i].fd == server_socket) { /* New connection request */
                     handle_new_connection_request_event();
+                    break;
                 } else { /* Client trying to send data */
                     handle_client_event(fds.fds[i].fd);
                 }
