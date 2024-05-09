@@ -15,8 +15,11 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 
+#include "version.h"
 #include "defines.h"
 #include "shader.h"
+#include "renderer.h"
+#include "color_palette.h"
 #include "common/config.h"
 #include "common/packet.h"
 #include "common/logger.h"
@@ -39,6 +42,14 @@
 
 #define VSYNC_ENABLED 1
 
+#if defined(DEBUG)
+    #define BUILD_MODE_STR "debug"
+#else
+    #define BUILD_MODE_STR "release"
+#endif
+
+#define BUILD_VERSION(major,minor,patch) BUILD_MODE_STR" v"STRINGIFY(major)"."STRINGIFY(minor)"."STRINGIFY(patch)
+
 typedef struct player {
     player_id id;
     vec2 position;
@@ -56,14 +67,14 @@ static struct pollfd pfds[POLLFD_COUNT];
 static i32 client_socket;
 static char input_buffer[INPUT_BUFFER_SIZE] = {0};
 static u32 input_count = 0;
-static char username[MAX_AUTHOR_SIZE];
+static char username[MAX_PLAYER_NAME_LENGTH];
 static b8 running = false;
 static vec2 current_window_size;
 static void *ring_buffer;
 static u32 current_sequence_number = 1;
 
 static shader_t flat_color_shader;
-static mat4 ortho_projection;
+mat4 ortho_projection;
 
 b8 handle_client_validation(i32 client)
 {
@@ -149,9 +160,9 @@ void handle_stdin_event(void)
         } else {
             packet_message_t message_packet = {0};
 
-            u32 username_size = strlen(username) > MAX_AUTHOR_SIZE ? MAX_AUTHOR_SIZE : strlen(username);
+            u32 username_size = strlen(username) > MAX_PLAYER_NAME_LENGTH ? MAX_PLAYER_NAME_LENGTH : strlen(username);
             strncpy(message_packet.author, username, username_size);
-            u32 content_size = input_count > MAX_CONTENT_SIZE ? MAX_CONTENT_SIZE : input_count;
+            u32 content_size = input_count > MAX_MESSAGE_CONTENT_LENGTH ? MAX_MESSAGE_CONTENT_LENGTH : input_count;
             strncpy(message_packet.content, input_buffer, content_size);
 
             if (!packet_send(client_socket, PACKET_TYPE_MESSAGE, &message_packet)) {
@@ -454,6 +465,16 @@ void signal_handler(i32 sig)
     running = false;
 }
 
+void display_build_version(void)
+{
+    renderer_draw_text(BUILD_VERSION(CLIENT_VERSION_MAJOR, CLIENT_VERSION_MINOR, CLIENT_VERSION_PATCH),
+                       FA32,
+                       vec2_create(3.0f, current_window_size.y - renderer_get_font_height(FA32)),
+                       1.0f,
+                       COLOR_MILK,
+                       0.6f);
+}
+
 int main(int argc, char *argv[])
 {
     if (argc != 4) {
@@ -543,6 +564,11 @@ int main(int argc, char *argv[])
 
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(f32), 0);
+
+    if (!renderer_init()) {
+        LOG_ERROR("failed to initialize renderer");
+        exit(EXIT_FAILURE);
+    }
 
     struct addrinfo hints, *result, *rp;
     memset(&hints, 0, sizeof(hints));
@@ -663,8 +689,8 @@ int main(int argc, char *argv[])
                     }
 
                     vec2 player_position = {
-                        .x = maths_lerpf(other_players[i].last_position.x, other_players[i].position.x, t),
-                        .y = maths_lerpf(other_players[i].last_position.y, other_players[i].position.y, t)
+                        .x = math_lerpf(other_players[i].last_position.x, other_players[i].position.x, t),
+                        .y = math_lerpf(other_players[i].last_position.y, other_players[i].position.y, t)
                     };
 
                     translation = mat4_translate(player_position);
@@ -683,6 +709,8 @@ int main(int argc, char *argv[])
             }
         }
 
+        display_build_version();
+
         glfwPollEvents();
         glfwSwapBuffers(window);
     }
@@ -698,6 +726,8 @@ int main(int argc, char *argv[])
     }
 
     LOG_INFO("removed self from players");
+
+    renderer_shutdown();
 
     glDeleteBuffers(1, &vbo);
     glDeleteVertexArrays(1, &vao);

@@ -2,25 +2,40 @@
 
 #include "defines.h"
 
-#define MATHS_PI 3.1415926f
+#define math_PI 3.1415926f
 
-#define DEG_TO_RAD(deg) (deg * MATHS_PI / 180.0f)
-#define RAD_TO_DEF(rad) (rad * 180.0f / MATHS_PI)
+#define DEG_TO_RAD(deg) (deg * math_PI / 180.0f)
+#define RAD_TO_DEF(rad) (rad * 180.0f / math_PI)
 
 typedef union vec2 {
     f32 elements[2];
     struct {
         union {
-            f32 x, r;
+            f32 x, r, u;
         };
         union {
-            f32 y, g;
+            f32 y, g, v;
         };
     };
 } vec2;
 
 typedef union vec3 {
     f32 elements[3];
+    struct {
+        union {
+            f32 x, r, u;
+        };
+        union {
+            f32 y, g, v;
+        };
+        union {
+            f32 z, b, w;
+        };
+    };
+} vec3;
+
+typedef union vec4 {
+    f32 elements[4];
     struct {
         union {
             f32 x, r;
@@ -31,29 +46,41 @@ typedef union vec3 {
         union {
             f32 z, b;
         };
+        union {
+            f32 w, a;
+        };
     };
-} vec3;
+} vec4;
+
+typedef struct vertex_2d {
+    vec2 position;
+    vec2 tex_coord;
+} vertex_2d;
 
 // NOTE: all matrix functions assume column-major order
 typedef struct mat4 {
     f32 data[16];
 } mat4;
 
-f32 maths_sinf(f32 value);
-f32 maths_cosf(f32 value);
+f32 math_sinf(f32 value);
+f32 math_cosf(f32 value);
 
 /* returns value between 0 (inclusive) and RAND_MAX(INT_MAX) (exclusive) */
-i32 maths_random(void);
+i32 math_random(void);
 /* min is inclusive, max is exclusive */
-i32 maths_random_range(i32 min, i32 max);
+i32 math_random_range(i32 min, i32 max);
 
 /* returns value between 0.0 (inclusive) and 1.0 (exclusive) */
-f32 maths_frandom(void);
+f32 math_frandom(void);
 /* min is inclusive, max is exclusive */
-f32 maths_frandom_range(f32 min, f32 max);
+f32 math_frandom_range(f32 min, f32 max);
 
-INLINE f32 maths_lerpf(f32 value_0, f32 value_1, f32 t) {
+INLINE f32 math_lerpf(f32 value_0, f32 value_1, f32 t) {
     return value_0 + t * (value_1 - value_0);
+}
+
+INLINE i32 math_max(i32 value_0, i32 value_1) {
+    return value_0 > value_1 ? value_0 : value_1;
 }
 
 INLINE vec2 vec2_zero(void)
@@ -94,6 +121,26 @@ INLINE vec3 vec3_create(f32 x, f32 y, f32 z)
         .x = x,
         .y = y,
         .z = z
+    };
+}
+
+INLINE vec4 vec4_create(f32 x, f32 y, f32 z, f32 w)
+{
+    return (vec4) {
+        .x = x,
+        .y = y,
+        .z = z,
+        .w = w
+    };
+}
+
+INLINE vec4 vec4_create_from_vec3(vec3 v, f32 w)
+{
+    return (vec4) {
+        .x = v.x,
+        .y = v.y,
+        .z = v.z,
+        .w = w
     };
 }
 
@@ -165,8 +212,8 @@ INLINE mat4 mat4_rotate(f32 angle_deg)
 {
     mat4 matrix = mat4_identity();
 
-    f32 c = maths_cosf(DEG_TO_RAD(angle_deg));
-    f32 s = maths_sinf(DEG_TO_RAD(angle_deg));
+    f32 c = math_cosf(DEG_TO_RAD(angle_deg));
+    f32 s = math_sinf(DEG_TO_RAD(angle_deg));
 
     matrix.data[0] = c;
     matrix.data[1] = -s;

@@ -16,8 +16,8 @@ typedef enum packet_type {
     PACKET_TYPE_COUNT
 } packet_type_e;
 
-#define MAX_AUTHOR_SIZE 32
-#define MAX_CONTENT_SIZE 256
+#define MAX_PLAYER_NAME_LENGTH 32
+#define MAX_MESSAGE_CONTENT_LENGTH 256
 #define MAX_PLAYER_COUNT 5
 
 #define PLAYER_INVALID_ID 0
@@ -35,8 +35,8 @@ typedef struct packet_ping {
 
 typedef struct packet_message {
     i64 timestamp;
-    char author[MAX_AUTHOR_SIZE];
-    char content[MAX_CONTENT_SIZE];
+    char author[MAX_PLAYER_NAME_LENGTH];
+    char content[MAX_MESSAGE_CONTENT_LENGTH];
 } packet_message_t;
 
 typedef struct packet_player_init {

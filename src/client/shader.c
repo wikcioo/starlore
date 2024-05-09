@@ -113,6 +113,16 @@ void shader_unbind(shader_t *shader)
     glUseProgram(0);
 }
 
+void shader_set_uniform_int(shader_t *shader, const char *name, i32 data)
+{
+    ASSERT(shader);
+    ASSERT(name);
+
+    i32 location = glGetUniformLocation(shader->program, name);
+    ASSERT(location != -1);
+    glUniform1i(location, data);
+}
+
 void shader_set_uniform_vec2(shader_t *shader, const char *name, vec2 *data)
 {
     ASSERT(shader);
@@ -133,6 +143,17 @@ void shader_set_uniform_vec3(shader_t *shader, const char *name, vec3 *data)
     i32 location = glGetUniformLocation(shader->program, name);
     ASSERT(location != -1);
     glUniform3fv(location, 1, (f32 *)data);
+}
+
+void shader_set_uniform_vec4(shader_t *shader, const char *name, vec4 *data)
+{
+    ASSERT(shader);
+    ASSERT(name);
+    ASSERT(data);
+
+    i32 location = glGetUniformLocation(shader->program, name);
+    ASSERT(location != -1);
+    glUniform4fv(location, 1, (f32 *)data);
 }
 
 void shader_set_uniform_mat4(shader_t *shader, const char *name, mat4 *data)

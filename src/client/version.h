@@ -1,0 +1,5 @@
+#pragma once
+
+#define CLIENT_VERSION_MAJOR 0
+#define CLIENT_VERSION_MINOR 1
+#define CLIENT_VERSION_PATCH 0

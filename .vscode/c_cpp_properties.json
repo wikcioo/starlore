@@ -4,7 +4,8 @@
             "name": "Linux",
             "includePath": [
                 "${workspaceFolder}/src",
-                "${workspaceFolder}/src/vendor/glad/include"
+                "${workspaceFolder}/src/vendor/glad/include",
+                "/usr/include/freetype2"
             ],
             "defines": [
                 "DEBUG",

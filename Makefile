@@ -46,13 +46,13 @@ server:
 	@make --no-print-directory $(BUILD_DIR)/server/server
 
 $(BUILD_DIR)/client/client: $(CLIENT_OBJECTS) $(COMMON_OBJECTS)
-	$(CC) $^ -lglfw -lm -o $@
+	$(CC) $^ -lglfw -lfreetype -lm -o $@
 
 $(BUILD_DIR)/server/server: $(SERVER_OBJECTS) $(COMMON_OBJECTS)
 	$(CC) $^ -lm -o $@
 
 $(BUILD_DIR)/client/%.c.o: $(CLIENT_DIR)/%.c
-	$(CC) -c $(WARNINGS) $(CFLAGS) -I$(SRC_DIR) -I$(VENDOR_DIR)/glad/include $^ -o $@
+	$(CC) -c $(WARNINGS) $(CFLAGS) -I$(SRC_DIR) -I$(VENDOR_DIR)/glad/include -I/usr/include/freetype2 $^ -o $@
 
 $(BUILD_DIR)/client/%.c.o: $(VENDOR_DIR)/glad/src/%.c
 	$(CC) -c -I$(VENDOR_DIR)/glad/include $^ -o $@

@@ -161,9 +161,9 @@ b8 validate_incoming_client(i32 client_socket)
 void handle_new_player_connection(i32 client_socket)
 {
     // Assign player to the new client
-    f32 red   = maths_frandom_range(0.0, 1.0);
-    f32 green = maths_frandom_range(0.0, 1.0);
-    f32 blue  = maths_frandom_range(0.0, 1.0);
+    f32 red   = math_frandom_range(0.0, 1.0);
+    f32 green = math_frandom_range(0.0, 1.0);
+    f32 blue  = math_frandom_range(0.0, 1.0);
     for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
         if (players[i].id == PLAYER_INVALID_ID) { /* Free slot */
             players[i].socket   = client_socket;
