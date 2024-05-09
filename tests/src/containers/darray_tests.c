@@ -69,8 +69,39 @@ b8 darray_push_and_pop(void)
     return true;
 }
 
+b8 darray_push_at_and_pop_at(void)
+{
+    i32 *array = (i32 *)darray_create(sizeof(i32));
+    darray_push(array, 10);
+    darray_push(array, 11);
+    darray_push(array, 12);
+    darray_push(array, 13);
+
+    darray_push_at(array, 1, 99);
+
+    expect_equal(darray_length(array), 5);
+    expect_equal(array[0], 10);
+    expect_equal(array[1], 99);
+    expect_equal(array[2], 11);
+    expect_equal(array[3], 12);
+    expect_equal(array[4], 13);
+
+    i32 popped_element;
+    darray_pop_at(array, 3, &popped_element);
+
+    expect_equal(popped_element, 12);
+    expect_equal(darray_length(array), 4);
+    expect_equal(array[0], 10);
+    expect_equal(array[1], 99);
+    expect_equal(array[2], 11);
+    expect_equal(array[3], 13);
+
+    return true;
+}
+
 void darray_register_tests(void)
 {
     test_manager_register_test(darray_create_and_destroy, "darray: create and destroy");
     test_manager_register_test(darray_push_and_pop, "darray: push and pop");
+    test_manager_register_test(darray_push_at_and_pop_at, "darray: push at and pop at");
 }

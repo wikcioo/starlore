@@ -19,6 +19,7 @@
 #include "defines.h"
 #include "shader.h"
 #include "renderer.h"
+#include "event.h"
 #include "color_palette.h"
 #include "common/config.h"
 #include "common/packet.h"
@@ -388,9 +389,55 @@ void glfw_error_callback(i32 code, const char *description)
     LOG_ERROR("glfw error code: %d (%s)", code, description);
 }
 
-void glfw_framebuffer_size_callback(GLFWwindow* window, i32 width, i32 height)
+void glfw_framebuffer_size_callback(GLFWwindow *window, i32 width, i32 height)
 {
-    current_window_size = vec2_create((f32)width, (f32)height);
+    event_system_fire(EVENT_CODE_WINDOW_RESIZED, (event_data_t){ .u32[0]=width, .u32[1]=height });
+}
+
+void glfw_window_close_callback(GLFWwindow *window)
+{
+    event_system_fire(EVENT_CODE_WINDOW_CLOSED, (event_data_t){0});
+}
+
+void glfw_key_callback(GLFWwindow *window, i32 key, i32 scancode, i32 action, i32 mods)
+{
+    if (action == KEYACTION_Press) {
+        event_system_fire(EVENT_CODE_KEY_PRESSED, (event_data_t){ .u16[0]=key });
+    } else if (action == KEYACTION_Release) {
+        event_system_fire(EVENT_CODE_KEY_RELEASED, (event_data_t){ .u16[0]=key });
+    }
+}
+
+b8 key_pressed_event_callback(event_code_e code, event_data_t data)
+{
+    u16 key = data.u16[0];
+    if (key == KEYCODE_P) {
+        send_ping_packet();
+    } else {
+        keys[key] = true;
+    }
+
+    return true;
+}
+
+b8 key_released_event_callback(event_code_e code, event_data_t data)
+{
+    u16 key = data.u16[0];
+    keys[key] = false;
+    return true;
+}
+
+b8 window_closed_event_callback(event_code_e code, event_data_t data)
+{
+    running = false;
+    return true;
+}
+
+b8 window_resized_event_callback(event_code_e code, event_data_t data)
+{
+    u32 width = data.u32[0];
+    u32 height = data.u32[1];
+    current_window_size = vec2_create(width, height);
     ortho_projection = mat4_orthographic(0.0f, current_window_size.x, 0.0f, current_window_size.y, -1.0f, 1.0f);
 
     shader_bind(&flat_color_shader);
@@ -398,14 +445,8 @@ void glfw_framebuffer_size_callback(GLFWwindow* window, i32 width, i32 height)
     shader_unbind(&flat_color_shader);
 
     glViewport(0, 0, width, height);
-}
 
-void glfw_key_callback(GLFWwindow* window, i32 key, i32 scancode, i32 action, i32 mods)
-{
-    if (key == GLFW_KEY_P && action == GLFW_PRESS)
-        send_ping_packet();
-
-    keys[key] = action;
+    return true;
 }
 
 void update_self_player(f64 delta_time)
@@ -503,6 +544,7 @@ int main(int argc, char *argv[])
 
     glfwMakeContextCurrent(window);
     glfwSetFramebufferSizeCallback(window, glfw_framebuffer_size_callback);
+    glfwSetWindowCloseCallback(window, glfw_window_close_callback);
     glfwSetKeyCallback(window, glfw_key_callback);
 
     glfwSwapInterval(VSYNC_ENABLED);
@@ -564,6 +606,11 @@ int main(int argc, char *argv[])
 
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(f32), 0);
+
+    if (!event_system_init()) {
+        LOG_ERROR("failed to initialize event system");
+        exit(EXIT_FAILURE);
+    }
 
     if (!renderer_init()) {
         LOG_ERROR("failed to initialize renderer");
@@ -628,6 +675,11 @@ int main(int argc, char *argv[])
 
     ring_buffer = ring_buffer_reserve(RING_BUFFER_CAPACITY, sizeof(packet_player_keypress_t));
 
+    event_system_register(EVENT_CODE_KEY_PRESSED, key_pressed_event_callback);
+    event_system_register(EVENT_CODE_KEY_RELEASED, key_released_event_callback);
+    event_system_register(EVENT_CODE_WINDOW_CLOSED, window_closed_event_callback);
+    event_system_register(EVENT_CODE_WINDOW_RESIZED, window_resized_event_callback);
+
     pthread_t network_thread;
     pthread_create(&network_thread, NULL, handle_networking, NULL);
 
@@ -641,7 +693,7 @@ int main(int argc, char *argv[])
 
     LOG_INFO("server tick rate: %u", SERVER_TICK_RATE);
 
-    while (!glfwWindowShouldClose(window) && running) {
+    while (running) {
         f64 now = glfwGetTime();
         delta_time = now - last_time;
         last_time = now;
@@ -727,7 +779,13 @@ int main(int argc, char *argv[])
 
     LOG_INFO("removed self from players");
 
+    event_system_unregister(EVENT_CODE_KEY_PRESSED, key_pressed_event_callback);
+    event_system_unregister(EVENT_CODE_KEY_RELEASED, key_released_event_callback);
+    event_system_unregister(EVENT_CODE_WINDOW_CLOSED, window_closed_event_callback);
+    event_system_unregister(EVENT_CODE_WINDOW_RESIZED, window_resized_event_callback);
+
     renderer_shutdown();
+    event_system_shutdown();
 
     glDeleteBuffers(1, &vbo);
     glDeleteVertexArrays(1, &vao);

@@ -133,3 +133,19 @@ typedef enum {
     KEYACTION_Press   = 1,
     KEYACTION_Repeat  = 2
 } keyaction_e;
+
+typedef enum {
+    // equivalent to glfw mouse button codes
+    MOUSEBUTTON_1        = 0,
+    MOUSEBUTTON_2        = 1,
+    MOUSEBUTTON_3        = 2,
+    MOUSEBUTTON_4        = 3,
+    MOUSEBUTTON_5        = 4,
+    MOUSEBUTTON_6        = 5,
+    MOUSEBUTTON_7        = 6,
+    MOUSEBUTTON_8        = 7,
+    MOUSEBUTTON_LAST     = MOUSEBUTTON_8,
+    MOUSEBUTTON_LEFT     = MOUSEBUTTON_1,
+    MOUSEBUTTON_RIGHT    = MOUSEBUTTON_2,
+    MOUSEBUTTON_MIDDLE   = MOUSEBUTTON_3
+} mousebutton_e;

@@ -84,9 +84,50 @@ void _darray_pop(void *array, void *out_element)
 
     if (out_element) {
         u8 *data = (u8 *)&header[DARRAY_FIELD_COUNT];
-        memcpy(out_element, data + ((length - 1)* stride), stride);
+        memcpy(out_element, data + ((length - 1) * stride), stride);
     }
 
+    _darray_field_set(array, DARRAY_FIELD_LENGTH, length - 1);
+}
+
+void *_darray_push_at(void *array, u64 index, const void *element)
+{
+    ASSERT(array);
+    ASSERT(element);
+
+    u64 capacity = darray_capacity(array);
+    u64 length = darray_length(array);
+    u64 stride = darray_stride(array);
+
+    ASSERT(index >= 0 && index < length);
+
+    if (length >= capacity) {
+        array = _darray_resize(array, capacity * DARRAY_DEFAULT_RESIZE_FACTOR);
+    }
+
+    memcpy((u8 *)array + ((index + 1) * stride), (u8 *)array + (index * stride), (length - index) * stride);
+    memcpy((u8 *)array + (index * stride), element, stride);
+    _darray_field_set(array, DARRAY_FIELD_LENGTH, length + 1);
+    return array;
+}
+
+void _darray_pop_at(void *array, u64 index, void *out_element)
+{
+    ASSERT(array);
+
+    u64 *header = (u64 *)array - DARRAY_FIELD_COUNT;
+    u64 length = darray_length(array);
+    u64 stride = darray_stride(array);
+
+    ASSERT(length > 0);
+    ASSERT(index >= 0 && index < length);
+
+    if (out_element) {
+        u8 *data = (u8 *)&header[DARRAY_FIELD_COUNT];
+        memcpy(out_element, data + (index * stride), stride);
+    }
+
+    memcpy((u8 *)array + (index * stride), (u8 *)array + ((index + 1) * stride), (length - index - 1) * stride);
     _darray_field_set(array, DARRAY_FIELD_LENGTH, length - 1);
 }
 

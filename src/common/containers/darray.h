@@ -28,6 +28,9 @@ void *_darray_resize(void *array, u64 new_capacity);
 void *_darray_push(void *array, const void *element);
 void  _darray_pop(void *array, void *out_element);
 
+void *_darray_push_at(void *array, u64 index, const void *element);
+void  _darray_pop_at(void *array, u64 index, void *out_element);
+
 u64 _darray_field_get(void *array, u64 field);
 void _darray_field_set(void *array, u64 field, u64 value);
 
@@ -48,6 +51,15 @@ void _darray_field_set(void *array, u64 field, u64 value);
 
 #define darray_pop(array, out_element) \
     _darray_pop(array, out_element)
+
+#define darray_push_at(array, index, element)      \
+    {                                              \
+        typeof(element) tmp = element;             \
+        array = _darray_push_at(array, index, &tmp);  \
+    }
+
+#define darray_pop_at(array, index, out_element) \
+    _darray_pop_at(array, index, out_element)
 
 #define darray_clear(array) \
     _darray_field_set(array, DARRAY_FIELD_LENGTH, 0)
