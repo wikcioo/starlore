@@ -20,9 +20,10 @@
 #include "common/asserts.h"
 #include "common/maths.h"
 #include "common/input_codes.h"
+#include "common/containers/darray.h"
 #include "common/containers/ring_buffer.h"
 
-#define INPUT_BUFFER_SIZE 1024
+#define INPUT_BUFFER_SIZE 4096
 #define INPUT_OVERFLOW_BUFFER_SIZE 256
 
 #define SERVER_BACKLOG 10
@@ -31,19 +32,29 @@
 
 #define POLL_INFINITE_TIMEOUT -1
 
-typedef struct server_pfd {
+#define MAX_MESSAGE_LENGTH 1024
+
+typedef struct {
     struct pollfd *fds;
     u32 count;
     u32 capacity;
 } server_pfd_t;
 
-typedef struct player {
+typedef struct {
     i32 socket;
     player_id id;
     u32 seq_nr;
+    char name[MAX_PLAYER_NAME_LENGTH];
     vec2 position;
     vec3 color;
 } player_t;
+
+typedef struct {
+    u32 type;
+    i64 timestamp;
+    char author[MAX_PLAYER_NAME_LENGTH];
+    char content[MAX_MESSAGE_CONTENT_LENGTH];
+} message_t;
 
 static b8 running;
 static i32 server_socket;
@@ -51,6 +62,7 @@ static server_pfd_t fds;
 static player_t players[MAX_PLAYER_COUNT];
 static player_id current_player_id = 1000;
 static void *input_ring_buffer;
+static message_t *messages;
 
 void server_pfd_init(u32 initial_capacity, server_pfd_t *out_server_pfd)
 {
@@ -108,6 +120,8 @@ void *get_in_addr(struct sockaddr *addr)
     return &((struct sockaddr_in6 *)addr)->sin6_addr;
 }
 
+static b8 receive_client_data(i32 client_socket, u8 *recv_buffer, u32 buffer_size, i64 *bytes_read);
+
 b8 validate_incoming_client(i32 client_socket)
 {
     struct timespec ts;
@@ -164,12 +178,13 @@ void handle_new_player_connection(i32 client_socket)
     f32 red   = math_frandom_range(0.0, 1.0);
     f32 green = math_frandom_range(0.0, 1.0);
     f32 blue  = math_frandom_range(0.0, 1.0);
-    for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
-        if (players[i].id == PLAYER_INVALID_ID) { /* Free slot */
-            players[i].socket   = client_socket;
-            players[i].id       = current_player_id;
-            players[i].position = vec2_create(0.0f, 0.0f);
-            players[i].color    = vec3_create(red, green, blue);
+    i32 new_player_idx;
+    for (new_player_idx = 0; new_player_idx < MAX_PLAYER_COUNT; new_player_idx++) {
+        if (players[new_player_idx].id == PLAYER_INVALID_ID) { /* Free slot */
+            players[new_player_idx].socket   = client_socket;
+            players[new_player_idx].id       = current_player_id;
+            players[new_player_idx].position = vec2_create(0.0f, 0.0f);
+            players[new_player_idx].color    = vec3_create(red, green, blue);
             break;
         }
     }
@@ -181,6 +196,28 @@ void handle_new_player_connection(i32 client_socket)
     };
     if (!packet_send(client_socket, PACKET_TYPE_PLAYER_INIT, &player_init_packet)) {
         LOG_ERROR("failed to send player init packet");
+    }
+
+    const u64 packet_size = PACKET_TYPE_SIZE[PACKET_TYPE_HEADER] + PACKET_TYPE_SIZE[PACKET_TYPE_PLAYER_INIT_CONF];
+    u8 buffer[INPUT_BUFFER_SIZE] = {0};
+    i64 bytes_read;
+    if (!receive_client_data(client_socket, buffer, packet_size, &bytes_read)) {
+        LOG_ERROR("failed to receive player init confirm packet from socket with fd=%d", client_socket);
+        return;
+    }
+
+    if (bytes_read == packet_size) {
+        packet_player_init_confirm_t *player_init_confirm_packet = (packet_player_init_confirm_t *)(buffer + PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]);
+        if (player_init_confirm_packet->id != current_player_id) {
+            LOG_ERROR("mismatched player init confirm id: expected=%d, actual=%d", current_player_id, player_init_confirm_packet->id);
+            return;
+        }
+
+        memset(players[new_player_idx].name, 0, sizeof(players[new_player_idx].name));
+        memcpy(players[new_player_idx].name, player_init_confirm_packet->name, strlen(player_init_confirm_packet->name));
+    } else {
+        LOG_ERROR("failed to read all required bytes for the player init confirm packet from socket with fd=%d", client_socket);
+        return;
     }
 
     current_player_id++;
@@ -199,19 +236,64 @@ void handle_new_player_connection(i32 client_socket)
         }
     }
 
-    // Update other players with the new player
+    // Send messages history
+    u64 messages_length = darray_length(messages);
+    u32 counter = 0;
+    packet_message_history_t message_history_packet = {0};
+    for (u64 i = 0; i < messages_length; i++) {
+        message_t message = messages[i];
+
+        packet_message_t message_packet = {0};
+        message_packet.type = message.type;
+        if (message.author[0] != 0) {
+            memcpy(message_packet.author, message.author, strlen(message.author));
+        }
+        memcpy(message_packet.content, message.content, strlen(message.content));
+
+        memcpy(&message_history_packet.history[counter++], &message_packet, sizeof(message_packet));
+        if (counter >= MAX_MESSAGE_HISTORY_LENGTH) {
+            message_history_packet.count = counter;
+            if (!packet_send(client_socket, PACKET_TYPE_MESSAGE_HISTORY, &message_history_packet)) {
+                LOG_ERROR("failed to send %u messages in the message history packet", counter);
+            }
+            counter = 0;
+        }
+    }
+    if (counter > 0) {
+        message_history_packet.count = counter;
+        if (!packet_send(client_socket, PACKET_TYPE_MESSAGE_HISTORY, &message_history_packet)) {
+            LOG_ERROR("failed to send %u messages in the message history packet", counter);
+        }
+    }
+
+    // Update other players with the new player and send system message to all
+    packet_message_t message_packet = {0};
+    message_packet.type = MESSAGE_TYPE_SYSTEM;
+    snprintf(message_packet.content, sizeof(message_packet.content), "new player <%s> joined the game!", players[new_player_idx].name);
+
     for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
-        if (players[i].id != PLAYER_INVALID_ID && players[i].id != player_init_packet.id) {
-            packet_player_add_t player_add_packet = {
-                .id       = player_init_packet.id,
-                .position = player_init_packet.position,
-                .color    = player_init_packet.color
-            };
-            if (!packet_send(players[i].socket, PACKET_TYPE_PLAYER_ADD, &player_add_packet)) {
-                LOG_ERROR("failed to send player add packet");
+        if (players[i].id != PLAYER_INVALID_ID) {
+            if (players[i].id != player_init_packet.id) {
+                packet_player_add_t player_add_packet = {
+                    .id       = player_init_packet.id,
+                    .position = player_init_packet.position,
+                    .color    = player_init_packet.color
+                };
+                if (!packet_send(players[i].socket, PACKET_TYPE_PLAYER_ADD, &player_add_packet)) {
+                    LOG_ERROR("failed to send player add packet");
+                }
+            }
+
+            if (!packet_send(players[i].socket, PACKET_TYPE_MESSAGE, &message_packet)) {
+                LOG_ERROR("failed to send message packet");
             }
         }
     }
+
+    message_t msg = {0};
+    msg.type = MESSAGE_TYPE_SYSTEM;
+    memcpy(msg.content, message_packet.content, strlen(message_packet.content));
+    darray_push(messages, msg);
 }
 
 void handle_new_connection_request_event(void)
@@ -274,13 +356,25 @@ b8 receive_client_data(i32 client_socket, u8 *recv_buffer, u32 buffer_size, i64 
                         .id = players[i].id
                     };
 
+                    packet_message_t message_packet = {0};
+                    message_packet.type = MESSAGE_TYPE_SYSTEM;
+                    snprintf(message_packet.content, sizeof(message_packet.content), "player <%s> left the game!", players[i].name);
+
                     for (i32 j = 0; j < MAX_PLAYER_COUNT; j++) {
                         if (players[j].id != PLAYER_INVALID_ID && players[j].id != players[i].id) {
                             if (!packet_send(players[j].socket, PACKET_TYPE_PLAYER_REMOVE, &player_remove_packet)) {
                                 LOG_ERROR("failed to send player remove packet for player with id=%u", players[j].id);
                             }
+                            if (!packet_send(players[j].socket, PACKET_TYPE_MESSAGE, &message_packet)) {
+                                LOG_ERROR("failed to send message packet");
+                            }
                         }
                     }
+
+                    message_t msg = {0};
+                    msg.type = MESSAGE_TYPE_SYSTEM;
+                    memcpy(msg.content, message_packet.content, strlen(message_packet.content));
+                    darray_push(messages, msg);
 
                     players[i].id = PLAYER_INVALID_ID;
                     break;
@@ -325,8 +419,14 @@ void handle_packet_type(i32 client_socket, u8 *packet_body_buffer, u32 type, u32
             time_t current_time = time(NULL);
             message->timestamp = (i64)current_time;
 
+            message_t msg = {0};
+            msg.type = MESSAGE_TYPE_PLAYER;
+            memcpy(msg.author, message->author, strlen(message->author));
+            memcpy(msg.content, message->content, strlen(message->content));
+            darray_push(messages, msg);
+
             for (i32 i = 0; i < fds.count; i++) {
-                if (/*fds.fds[i].fd == client_socket || */fds.fds[i].fd == server_socket) {
+                if (fds.fds[i].fd == server_socket) {
                     continue;
                 }
                 if (!packet_send(fds.fds[i].fd, PACKET_TYPE_MESSAGE, message)) {
@@ -338,9 +438,10 @@ void handle_packet_type(i32 client_socket, u8 *packet_body_buffer, u32 type, u32
             received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_PLAYER_REMOVE];
             packet_player_remove_t *remove = (packet_player_remove_t *)packet_body_buffer;
             b8 found_player_to_remove = false;
-            for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
-                if (players[i].id == remove->id) {
-                    players[i].id = PLAYER_INVALID_ID;
+            i32 player_idx;
+            for (player_idx = 0; player_idx < MAX_PLAYER_COUNT; player_idx++) {
+                if (players[player_idx].id == remove->id) {
+                    players[player_idx].id = PLAYER_INVALID_ID;
                     found_player_to_remove = true;
                     break;
                 }
@@ -350,14 +451,26 @@ void handle_packet_type(i32 client_socket, u8 *packet_body_buffer, u32 type, u32
             } else {
                 LOG_INFO("removed player with id=%d", remove->id);
 
+                packet_message_t message_packet = {0};
+                message_packet.type = MESSAGE_TYPE_SYSTEM;
+                snprintf(message_packet.content, sizeof(message_packet.content), "player <%s> left the game!", players[player_idx].name);
+
                 // Send updates to the rest of the players
                 for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
                     if (players[i].id != PLAYER_INVALID_ID && players[i].id != remove->id) {
                         if (!packet_send(players[i].socket, PACKET_TYPE_PLAYER_REMOVE, remove)) {
                             LOG_ERROR("failed to send player remove packet to player with id=%u", players[i].id);
                         }
+                        if (!packet_send(players[i].socket, PACKET_TYPE_MESSAGE, &message_packet)) {
+                            LOG_ERROR("failed to send message packet");
+                        }
                     }
                 }
+
+                message_t msg = {0};
+                msg.type = MESSAGE_TYPE_SYSTEM;
+                memcpy(msg.content, message_packet.content, strlen(message_packet.content));
+                darray_push(messages, msg);
             }
         } break;
         case PACKET_TYPE_PLAYER_UPDATE: {
@@ -627,6 +740,7 @@ int main(int argc, char *argv[])
     server_pfd_add(&fds, server_socket);
 
     input_ring_buffer = ring_buffer_reserve(INPUT_RING_BUFFER_CAPACITY, sizeof(packet_player_keypress_t));
+    messages = darray_create(sizeof(message_t));
 
     struct sigaction sa = {0};
     sa.sa_flags = SA_RESTART; // Restart functions interruptable by EINTR like poll()
@@ -665,6 +779,9 @@ int main(int argc, char *argv[])
     }
 
     LOG_INFO("server shutting down");
+
+    // TODO: Permanently store messages to disk. For now just delete them all
+    darray_destroy(messages);
 
     server_pfd_shutdown(&fds);
 

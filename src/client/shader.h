@@ -3,13 +3,11 @@
 #include "defines.h"
 #include "common/maths.h"
 
-typedef struct shader
-{
+typedef struct {
     u32 program;
 } shader_t;
 
-typedef struct shader_create_info
-{
+typedef struct {
     const char *vertex_filepath;
     const char *fragment_filepath;
 } shader_create_info_t;

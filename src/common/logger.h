@@ -9,8 +9,7 @@
 #define ENABLE_INFO_LOG 1
 #define ENABLE_WARN_LOG 1
 
-typedef enum log_level
-{
+typedef enum {
     LOG_LEVEL_TRACE,
     LOG_LEVEL_DEBUG,
     LOG_LEVEL_INFO,

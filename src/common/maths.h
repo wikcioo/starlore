@@ -52,13 +52,13 @@ typedef union vec4 {
     };
 } vec4;
 
-typedef struct vertex_2d {
+typedef struct {
     vec2 position;
     vec2 tex_coord;
 } vertex_2d;
 
 // NOTE: all matrix functions assume column-major order
-typedef struct mat4 {
+typedef struct {
     f32 data[16];
 } mat4;
 

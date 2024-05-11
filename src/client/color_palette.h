@@ -2,6 +2,7 @@
 
 #include "common/maths.h"
 
+#define COLOR_BLACK             vec3_create(0.000, 0.000, 0.000)
 #define COLOR_MILK              vec3_create(0.972, 0.972, 0.902)
 #define COLOR_SKY_BLUE          vec3_create(0.529, 0.808, 0.922)
 #define COLOR_MIDNIGHT_BLUE     vec3_create(0.098, 0.098, 0.439)

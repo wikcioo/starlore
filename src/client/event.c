@@ -4,7 +4,7 @@
 #include "common/asserts.h"
 #include "common/containers/darray.h"
 
-typedef struct registered_event {
+typedef struct {
     fp_event_callback *callbacks;
 } registered_event_t;
 

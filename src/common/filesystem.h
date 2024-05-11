@@ -2,14 +2,14 @@
 
 #include "defines.h"
 
-typedef struct file_handle {
+typedef struct {
     void *handle;
     b8 is_valid  : 1;
     b8 is_binary : 1;
     b8 modes     : 3;
 } file_handle_t;
 
-typedef enum file_mode {
+typedef enum {
     FILE_MODE_READ   = BIT(0),
     FILE_MODE_WRITE  = BIT(1),
     FILE_MODE_APPEND = BIT(2)

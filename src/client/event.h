@@ -2,7 +2,7 @@
 
 #include "defines.h"
 
-typedef enum event_code {
+typedef enum {
     // invalid event code
     EVENT_CODE_NONE,
 
@@ -50,7 +50,7 @@ typedef enum event_code {
     EVENT_CODE_COUNT
 } event_code_e;
 
-typedef struct event_data {
+typedef struct {
     // max 16 bytes of data in a single event
     union {
         u64 u64[2];

@@ -20,7 +20,10 @@
 #include "shader.h"
 #include "renderer.h"
 #include "event.h"
+#include "chat.h"
 #include "color_palette.h"
+#include "common/asserts.h"
+#include "common/strings.h"
 #include "common/config.h"
 #include "common/packet.h"
 #include "common/logger.h"
@@ -29,7 +32,8 @@
 #include "common/containers/ring_buffer.h"
 
 #define POLLFD_COUNT 2
-#define INPUT_BUFFER_SIZE 1024
+#define INPUT_BUFFER_SIZE 4096
+#define OVERFLOW_BUFFER_SIZE 1024
 #define RING_BUFFER_CAPACITY 256
 #define POLL_INFINITE_TIMEOUT -1
 
@@ -51,7 +55,7 @@
 
 #define BUILD_VERSION(major,minor,patch) BUILD_MODE_STR" v"STRINGIFY(major)"."STRINGIFY(minor)"."STRINGIFY(patch)
 
-typedef struct player {
+typedef struct {
     player_id id;
     vec2 position;
     vec2 last_position; // Used for interpolation
@@ -68,13 +72,14 @@ static struct pollfd pfds[POLLFD_COUNT];
 static i32 client_socket;
 static char input_buffer[INPUT_BUFFER_SIZE] = {0};
 static u32 input_count = 0;
-static char username[MAX_PLAYER_NAME_LENGTH];
 static b8 running = false;
 static vec2 current_window_size;
 static void *ring_buffer;
 static u32 current_sequence_number = 1;
-
+static b8 chat_visible = false;
 static shader_t flat_color_shader;
+
+char username[MAX_PLAYER_NAME_LENGTH];
 mat4 ortho_projection;
 
 b8 handle_client_validation(i32 client)
@@ -158,13 +163,18 @@ void handle_stdin_event(void)
 
             input_count = 0;
             memset(input_buffer, 0, INPUT_BUFFER_SIZE);
-        } else {
-            packet_message_t message_packet = {0};
+        } else if (input_count > 0) {
+            char *input_trimmed = string_trim(input_buffer);
+            if (strlen(input_trimmed) < 1) {
+                return;
+            }
 
+            packet_message_t message_packet = {0};
+            message_packet.type = MESSAGE_TYPE_PLAYER;
             u32 username_size = strlen(username) > MAX_PLAYER_NAME_LENGTH ? MAX_PLAYER_NAME_LENGTH : strlen(username);
             strncpy(message_packet.author, username, username_size);
             u32 content_size = input_count > MAX_MESSAGE_CONTENT_LENGTH ? MAX_MESSAGE_CONTENT_LENGTH : input_count;
-            strncpy(message_packet.content, input_buffer, content_size);
+            strncpy(message_packet.content, input_trimmed, content_size);
 
             if (!packet_send(client_socket, PACKET_TYPE_MESSAGE, &message_packet)) {
                 LOG_ERROR("failed to send message packet");
@@ -178,9 +188,9 @@ void handle_stdin_event(void)
 
 void handle_socket_event(void)
 {
-    u8 recv_buffer[INPUT_BUFFER_SIZE] = {0};
+    u8 recv_buffer[INPUT_BUFFER_SIZE + OVERFLOW_BUFFER_SIZE] = {0};
 
-    i64 bytes_read = recv(client_socket, &recv_buffer, INPUT_BUFFER_SIZE, 0);
+    i64 bytes_read = recv(client_socket, recv_buffer, INPUT_BUFFER_SIZE, 0);
     if (bytes_read <= 0) {
         if (bytes_read == -1) {
             LOG_ERROR("recv error: %s", strerror(errno));
@@ -192,160 +202,202 @@ void handle_socket_event(void)
         return;
     }
 
-    if (bytes_read < PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]) { /* Check if at least 'header' amount of bytes were read */
-        LOG_WARN("unimplemented: read less bytes than the header size"); /* TODO: Handle the case of having read less than header size */
-    } else {
-        /* Check if multiple packets included in single tcp data reception */
-        u8 *buffer = recv_buffer;
-        for (;;) {
-            packet_header_t *header = (packet_header_t *)buffer;
+    ASSERT_MSG(bytes_read >= PACKET_TYPE_SIZE[PACKET_TYPE_HEADER], "unimplemented: at least header size amount of bytes must be read");
 
-            if (bytes_read - PACKET_TYPE_SIZE[PACKET_TYPE_HEADER] < header->size) {
-                LOG_WARN("unimplemented: not read the entire packet body"); /* TODO: Handle the case of not having read the entire packet body */
-                break;
-            } else {
-                u32 received_data_size = 0;
-                switch (header->type) {
-                    case PACKET_TYPE_NONE: {
-                        LOG_WARN("received PACKET_TYPE_NONE, ignoring...");
-                    } break;
-                    case PACKET_TYPE_PING: {
-                        received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_PING];
-                        packet_ping_t *data = (packet_ping_t *)(buffer + PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]);
+    // Check if multiple packets included in single tcp data reception
+    u8 *buffer = recv_buffer;
+    for (;;) {
+        packet_header_t *header = (packet_header_t *)buffer;
 
-                        struct timespec ts;
-                        clock_gettime(CLOCK_MONOTONIC, &ts);
-                        u64 time_now = (u64)(ts.tv_sec * 1000000000 + ts.tv_nsec);
+        if (bytes_read - PACKET_TYPE_SIZE[PACKET_TYPE_HEADER] < header->size) {
+            u64 missing_bytes = header->size - (bytes_read - PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]);
+            LOG_TRACE("not read the entire packet body. reading %lu more", missing_bytes);
 
-                        f64 ping_ms = (time_now - data->time) / 1000000.0;
-                        LOG_TRACE("ping = %fms", ping_ms);
-                    } break;
-                    case PACKET_TYPE_MESSAGE: {
-                        received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_MESSAGE];
-                        packet_message_t *message = (packet_message_t *)(buffer + PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]);
-                        struct tm *local_time = localtime((time_t *)&message->timestamp);
-                        LOG_TRACE("[%d-%02d-%02d %02d:%02d] %s: %s",
-                            local_time->tm_year + 1900,
-                            local_time->tm_mon + 1,
-                            local_time->tm_mday,
-                            local_time->tm_hour,
-                            local_time->tm_min,
-                            message->author,
-                            message->content);
-                    } break;
-                    case PACKET_TYPE_PLAYER_INIT: {
-                        received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_PLAYER_INIT];
-                        packet_player_init_t *player_init = (packet_player_init_t *)(buffer + PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]);
-                        self_player.id       = player_init->id;
-                        self_player.position = player_init->position;
-                        self_player.color    = player_init->color;
-                        LOG_INFO("initialized self: id=%u position=(%f,%f) color=(%f,%f,%f)",
-                                self_player.id,
-                                self_player.position.x, self_player.position.y,
-                                self_player.color.r, self_player.color.g, self_player.color.b);
-                    } break;
-                    case PACKET_TYPE_PLAYER_ADD: {
-                        received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_PLAYER_ADD];
-                        packet_player_add_t *player_add = (packet_player_add_t *)(buffer + PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]);
+            ASSERT_MSG(missing_bytes <= OVERFLOW_BUFFER_SIZE, "not enough space in overflow buffer. consider increasing the size");
 
-                        b8 found_free_slot = false;
-                        for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
-                            if (other_players[i].id == PLAYER_INVALID_ID) { /* Free slot */
-                                LOG_INFO("adding new player id=%u", player_add->id);
-                                other_players[i].id              = player_add->id;
-                                other_players[i].position        = player_add->position;
-                                other_players[i].color           = player_add->color;
-                                other_players[i].last_position   = player_add->position;
-                                other_players[i].interp_complete = true;
-                                other_player_count++;
-                                found_free_slot = true;
-                                break;
-                            }
+            // Read into OVERFLOW_BUFFER of the recv_buffer and proceed to packet interpretation
+            i64 new_bytes_read = recv(client_socket, &recv_buffer[INPUT_BUFFER_SIZE], missing_bytes, 0);
+            UNUSED(new_bytes_read); // prevents compiler warning in release mode
+            ASSERT(new_bytes_read == missing_bytes);
+        }
+
+        u32 received_data_size = 0;
+        switch (header->type) {
+            case PACKET_TYPE_NONE: {
+                LOG_WARN("received PACKET_TYPE_NONE, ignoring...");
+            } break;
+            case PACKET_TYPE_PING: {
+                received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_PING];
+                packet_ping_t *data = (packet_ping_t *)(buffer + PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]);
+
+                struct timespec ts;
+                clock_gettime(CLOCK_MONOTONIC, &ts);
+                u64 time_now = (u64)(ts.tv_sec * 1000000000 + ts.tv_nsec);
+
+                f64 ping_ms = (time_now - data->time) / 1000000.0;
+                LOG_TRACE("ping = %fms", ping_ms);
+            } break;
+            case PACKET_TYPE_MESSAGE: {
+                received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_MESSAGE];
+                packet_message_t *message = (packet_message_t *)(buffer + PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]);
+                struct tm *local_time = localtime((time_t *)&message->timestamp);
+                LOG_TRACE("[%d-%02d-%02d %02d:%02d] %s: %s",
+                    local_time->tm_year + 1900,
+                    local_time->tm_mon + 1,
+                    local_time->tm_mday,
+                    local_time->tm_hour,
+                    local_time->tm_min,
+                    message->author,
+                    message->content);
+
+                if (message->type == MESSAGE_TYPE_SYSTEM) {
+                    chat_add_system_message(message->content);
+                } else if (message->type == MESSAGE_TYPE_PLAYER) {
+                    chat_player_message_t msg = {0};
+                    memcpy(msg.name, message->author, strlen(message->author));
+                    memcpy(msg.content, message->content, strlen(message->content));
+                    chat_add_player_message(msg);
+                } else {
+                    LOG_ERROR("unknown single message type %d", message->type);
+                }
+            } break;
+            case PACKET_TYPE_MESSAGE_HISTORY: {
+                received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_MESSAGE_HISTORY];
+                packet_message_history_t *message_history = (packet_message_history_t *)(buffer + PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]);
+                for (u32 i = 0; i < message_history->count; i++) {
+                    packet_message_t message = message_history->history[i];
+                    if (message.type == MESSAGE_TYPE_SYSTEM) {
+                        chat_add_system_message(message.content);
+                    } else if (message.type == MESSAGE_TYPE_PLAYER) {
+                        chat_player_message_t msg = {0};
+                        memcpy(msg.name, message.author, strlen(message.author));
+                        memcpy(msg.content, message.content, strlen(message.content));
+                        chat_add_player_message(msg);
+                    } else {
+                        LOG_ERROR("unknown history message type %d", message.type);
+                    }
+                }
+            } break;
+            case PACKET_TYPE_PLAYER_INIT: {
+                received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_PLAYER_INIT];
+                packet_player_init_t *player_init = (packet_player_init_t *)(buffer + PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]);
+                self_player.id       = player_init->id;
+                self_player.position = player_init->position;
+                self_player.color    = player_init->color;
+                LOG_INFO("initialized self: id=%u position=(%f,%f) color=(%f,%f,%f)",
+                        self_player.id,
+                        self_player.position.x, self_player.position.y,
+                        self_player.color.r, self_player.color.g, self_player.color.b);
+
+                packet_player_init_confirm_t player_confirm_packet = {0};
+                player_confirm_packet.id = self_player.id;
+                memcpy(player_confirm_packet.name, username, strlen(username));
+                if (!packet_send(client_socket, PACKET_TYPE_PLAYER_INIT_CONF, &player_confirm_packet)) {
+                    LOG_ERROR("failed to send player init confirm packet");
+                }
+            } break;
+            case PACKET_TYPE_PLAYER_ADD: {
+                received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_PLAYER_ADD];
+                packet_player_add_t *player_add = (packet_player_add_t *)(buffer + PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]);
+
+                b8 found_free_slot = false;
+                for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
+                    if (other_players[i].id == PLAYER_INVALID_ID) { /* Free slot */
+                        LOG_INFO("adding new player id=%u", player_add->id);
+                        other_players[i].id              = player_add->id;
+                        other_players[i].position        = player_add->position;
+                        other_players[i].color           = player_add->color;
+                        other_players[i].last_position   = player_add->position;
+                        other_players[i].interp_complete = true;
+                        other_player_count++;
+                        found_free_slot = true;
+                        break;
+                    }
+                }
+                if (!found_free_slot) {
+                    LOG_ERROR("failed to add new player, no free slots - other_player_count=%u", other_player_count);
+                }
+            } break;
+            case PACKET_TYPE_PLAYER_REMOVE: {
+                received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_PLAYER_REMOVE];
+                packet_player_remove_t *player_remove = (packet_player_remove_t *)(buffer + PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]);
+                b8 found_player_to_remove = false;
+                for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
+                    if (other_players[i].id == player_remove->id) {
+                        other_players[i].id = PLAYER_INVALID_ID;
+                        found_player_to_remove = true;
+                        break;
+                    }
+                }
+                if (!found_player_to_remove) {
+                    LOG_ERROR("failed to find player to remove with id=%u", player_remove->id);
+                } else {
+                    LOG_INFO("removed player with id=%d", player_remove->id);
+                }
+            } break;
+            case PACKET_TYPE_PLAYER_UPDATE: {
+                received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_PLAYER_UPDATE];
+                packet_player_update_t *player_update = (packet_player_update_t *)(buffer + PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]);
+
+                if (player_update->id == self_player.id) {
+                    for (;;) {
+                        b8 dequeue_status;
+                        packet_player_keypress_t keypress = {0};
+
+                        ring_buffer_dequeue(ring_buffer, &keypress, &dequeue_status);
+                        if (!dequeue_status) {
+                            LOG_WARN("ran out of keypresses and did not find appropriate sequence number");
+                            break;
                         }
-                        if (!found_free_slot) {
-                            LOG_ERROR("failed to add new player, no free slots - other_player_count=%u", other_player_count);
-                        }
-                    } break;
-                    case PACKET_TYPE_PLAYER_REMOVE: {
-                        received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_PLAYER_REMOVE];
-                        packet_player_remove_t *player_remove = (packet_player_remove_t *)(buffer + PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]);
-                        b8 found_player_to_remove = false;
-                        for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
-                            if (other_players[i].id == player_remove->id) {
-                                other_players[i].id = PLAYER_INVALID_ID;
-                                found_player_to_remove = true;
-                                break;
-                            }
-                        }
-                        if (!found_player_to_remove) {
-                            LOG_ERROR("failed to find player to remove with id=%u", player_remove->id);
-                        } else {
-                            LOG_INFO("removed player with id=%d", player_remove->id);
-                        }
-                    } break;
-                    case PACKET_TYPE_PLAYER_UPDATE: {
-                        received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_PLAYER_UPDATE];
-                        packet_player_update_t *player_update = (packet_player_update_t *)(buffer + PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]);
 
-                        if (player_update->id == self_player.id) {
-                            for (;;) {
-                                b8 dequeue_status;
-                                packet_player_keypress_t keypress = {0};
+                        if (keypress.seq_nr == player_update->seq_nr) {
+                            // Got authoritative position update from the server, so update self_player position received from the server
+                            // and re-apply all keypresses that happened since then
+                            self_player.position = player_update->position;
 
-                                ring_buffer_dequeue(ring_buffer, &keypress, &dequeue_status);
-                                if (!dequeue_status) {
-                                    LOG_WARN("ran out of keypresses and did not find appropriate sequence number");
-                                    break;
-                                }
-
-                                if (keypress.seq_nr == player_update->seq_nr) {
-                                    // Got authoritative position update from the server, so update self_player position received from the server
-                                    // and re-apply all keypresses that happened since then
-                                    self_player.position = player_update->position;
-
-                                    u32 nth_element = 0;
-                                    while (ring_buffer_peek_from_end(ring_buffer, nth_element++, &keypress)) {
-                                        if (keypress.key == KEYCODE_W) {
-                                            self_player.position.y += PLAYER_VELOCITY;
-                                        } else if (keypress.key == KEYCODE_S) {
-                                            self_player.position.y -= PLAYER_VELOCITY;
-                                        } else if (keypress.key == KEYCODE_A) {
-                                            self_player.position.x -= PLAYER_VELOCITY;
-                                        } else if (keypress.key == KEYCODE_D) {
-                                            self_player.position.x += PLAYER_VELOCITY;
-                                        }
-                                    }
-                                    break;
+                            u32 nth_element = 0;
+                            while (ring_buffer_peek_from_end(ring_buffer, nth_element++, &keypress)) {
+                                if (keypress.key == KEYCODE_W) {
+                                    self_player.position.y += PLAYER_VELOCITY;
+                                } else if (keypress.key == KEYCODE_S) {
+                                    self_player.position.y -= PLAYER_VELOCITY;
+                                } else if (keypress.key == KEYCODE_A) {
+                                    self_player.position.x -= PLAYER_VELOCITY;
+                                } else if (keypress.key == KEYCODE_D) {
+                                    self_player.position.x += PLAYER_VELOCITY;
                                 }
                             }
                             break;
                         }
-
-                        b8 found_player_to_update = false;
-                        for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
-                            if (other_players[i].id == player_update->id) {
-                                other_players[i].last_position = other_players[i].position;
-                                other_players[i].position = player_update->position;
-                                other_players[i].interp_complete = false;
-                                found_player_to_update = true;
-                                server_update_accumulator = 0.0f;
-                                break;
-                            }
-                        }
-                        if (!found_player_to_update) {
-                            LOG_ERROR("failed to update player with id=%u", player_update->id);
-                        }
-                    } break;
-                    default:
-                        LOG_WARN("received unknown packet type, ignoring...");
-                }
-
-                buffer = (buffer + PACKET_TYPE_SIZE[PACKET_TYPE_HEADER] + received_data_size);
-                packet_header_t *next_header = (packet_header_t *)buffer;
-                if (next_header->type <= PACKET_TYPE_NONE || next_header->type >= PACKET_TYPE_COUNT) {
+                    }
                     break;
                 }
-            }
+
+                b8 found_player_to_update = false;
+                for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
+                    if (other_players[i].id == player_update->id) {
+                        other_players[i].last_position = other_players[i].position;
+                        other_players[i].position = player_update->position;
+                        other_players[i].interp_complete = false;
+                        found_player_to_update = true;
+                        server_update_accumulator = 0.0f;
+                        break;
+                    }
+                }
+                if (!found_player_to_update) {
+                    LOG_ERROR("failed to update player with id=%u", player_update->id);
+                }
+            } break;
+            default:
+                LOG_WARN("received unknown packet type, ignoring...");
+        }
+
+        u64 parsed_packet_size = PACKET_TYPE_SIZE[PACKET_TYPE_HEADER] + received_data_size;
+        buffer = (buffer + parsed_packet_size);
+        bytes_read -= parsed_packet_size;
+        packet_header_t *next_header = (packet_header_t *)buffer;
+        if (next_header->type <= PACKET_TYPE_NONE || next_header->type >= PACKET_TYPE_COUNT) {
+            break;
         }
     }
 }
@@ -413,6 +465,8 @@ b8 key_pressed_event_callback(event_code_e code, event_data_t data)
     u16 key = data.u16[0];
     if (key == KEYCODE_P) {
         send_ping_packet();
+    } else if (key == KEYCODE_T) {
+        chat_visible = !chat_visible;
     } else {
         keys[key] = true;
     }
@@ -675,6 +729,8 @@ int main(int argc, char *argv[])
 
     ring_buffer = ring_buffer_reserve(RING_BUFFER_CAPACITY, sizeof(packet_player_keypress_t));
 
+    chat_init();
+
     event_system_register(EVENT_CODE_KEY_PRESSED, key_pressed_event_callback);
     event_system_register(EVENT_CODE_KEY_RELEASED, key_released_event_callback);
     event_system_register(EVENT_CODE_WINDOW_CLOSED, window_closed_event_callback);
@@ -722,7 +778,8 @@ int main(int argc, char *argv[])
             mat4 model = mat4_multiply(translation, mat4_multiply(rotation, scale));
 
             shader_set_uniform_mat4(&flat_color_shader, "u_model", &model);
-            shader_set_uniform_vec3(&flat_color_shader, "u_color", &self_player.color);
+            vec4 player_color = vec4_create_from_vec3(self_player.color, 1.0f);
+            shader_set_uniform_vec4(&flat_color_shader, "u_color", &player_color);
 
             glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, NULL);
         }
@@ -755,13 +812,18 @@ int main(int argc, char *argv[])
                 mat4 model = mat4_multiply(translation, mat4_multiply(rotation, scale));
 
                 shader_set_uniform_mat4(&flat_color_shader, "u_model", &model);
-                shader_set_uniform_vec3(&flat_color_shader, "u_color", &other_players[i].color);
+                vec4 player_color = vec4_create_from_vec3(other_players[i].color, 1.0f);
+                shader_set_uniform_vec4(&flat_color_shader, "u_color", &player_color);
 
                 glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, NULL);
             }
         }
 
         display_build_version();
+
+        if (chat_visible) {
+            chat_render();
+        }
 
         glfwPollEvents();
         glfwSwapBuffers(window);
@@ -784,6 +846,7 @@ int main(int argc, char *argv[])
     event_system_unregister(EVENT_CODE_WINDOW_CLOSED, window_closed_event_callback);
     event_system_unregister(EVENT_CODE_WINDOW_RESIZED, window_resized_event_callback);
 
+    chat_shutdown();
     renderer_shutdown();
     event_system_shutdown();
 

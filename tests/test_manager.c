@@ -4,7 +4,7 @@
 
 #include "common/containers/darray.h"
 
-typedef struct test_instance {
+typedef struct {
     fp_test test_function;
     const char *description;
 } test_instance_t;
