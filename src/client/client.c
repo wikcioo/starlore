@@ -69,18 +69,19 @@ static f32 server_update_accumulator = 0.0f;
 static player_t self_player;
 static b8 keys[KEYCODE_Last];
 static struct pollfd pfds[POLLFD_COUNT];
-static i32 client_socket;
 static char input_buffer[INPUT_BUFFER_SIZE] = {0};
 static u32 input_count = 0;
 static b8 running = false;
-static vec2 current_window_size;
 static void *ring_buffer;
 static u32 current_sequence_number = 1;
-static b8 chat_visible = false;
 static shader_t flat_color_shader;
 
+// Data referenced from somewhere else
 char username[MAX_PLAYER_NAME_LENGTH];
 mat4 ortho_projection;
+vec2 current_window_size;
+i32 client_socket;
+GLFWwindow *main_window;
 
 b8 handle_client_validation(i32 client)
 {
@@ -453,10 +454,28 @@ void glfw_window_close_callback(GLFWwindow *window)
 
 void glfw_key_callback(GLFWwindow *window, i32 key, i32 scancode, i32 action, i32 mods)
 {
-    if (action == KEYACTION_Press) {
-        event_system_fire(EVENT_CODE_KEY_PRESSED, (event_data_t){ .u16[0]=key });
-    } else if (action == KEYACTION_Release) {
-        event_system_fire(EVENT_CODE_KEY_RELEASED, (event_data_t){ .u16[0]=key });
+    event_data_t data = {0};
+    data.u16[0] = key;
+    data.u16[1] = mods;
+
+    if (action == INPUTACTION_Press) {
+        event_system_fire(EVENT_CODE_KEY_PRESSED, data);
+    } else if (action == INPUTACTION_Release) {
+        event_system_fire(EVENT_CODE_KEY_RELEASED, data);
+    } else if (action == INPUTACTION_Repeat) {
+        event_system_fire(EVENT_CODE_KEY_REPEATED, data);
+    }
+}
+
+void glfw_char_callback(GLFWwindow *window, u32 codepoint)
+{
+    event_system_fire(EVENT_CODE_CHAR_PRESSED, (event_data_t){ .u32[0]=codepoint });
+}
+
+void glfw_mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
+{
+    if (action == INPUTACTION_Press) {
+        event_system_fire(EVENT_CODE_MOUSE_BUTTON_PRESSED, (event_data_t){ .u8[0]=button });
     }
 }
 
@@ -465,8 +484,6 @@ b8 key_pressed_event_callback(event_code_e code, event_data_t data)
     u16 key = data.u16[0];
     if (key == KEYCODE_P) {
         send_ping_packet();
-    } else if (key == KEYCODE_T) {
-        chat_visible = !chat_visible;
     } else {
         keys[key] = true;
     }
@@ -539,7 +556,7 @@ void update_self_player(f64 delta_time)
             .id = self_player.id,
             .seq_nr = current_sequence_number++,
             .key = key,
-            .action = KEYACTION_Press
+            .action = INPUTACTION_Press
         };
 
         b8 enqueue_status;
@@ -586,8 +603,8 @@ int main(int argc, char *argv[])
 
     glfwSetErrorCallback(glfw_error_callback);
 
-    GLFWwindow *window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Chat Client", NULL, NULL);
-    if (window == NULL) {
+    main_window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Chat Client", NULL, NULL);
+    if (main_window == NULL) {
         LOG_FATAL("failed to create glfw window");
         glfwTerminate();
         exit(EXIT_FAILURE);
@@ -596,16 +613,18 @@ int main(int argc, char *argv[])
     current_window_size = vec2_create((f32)WINDOW_WIDTH, (f32)WINDOW_HEIGHT);
     ortho_projection = mat4_orthographic(0.0f, current_window_size.x, 0.0f, current_window_size.y, -1.0f, 1.0f);
 
-    glfwMakeContextCurrent(window);
-    glfwSetFramebufferSizeCallback(window, glfw_framebuffer_size_callback);
-    glfwSetWindowCloseCallback(window, glfw_window_close_callback);
-    glfwSetKeyCallback(window, glfw_key_callback);
+    glfwMakeContextCurrent(main_window);
+    glfwSetFramebufferSizeCallback(main_window, glfw_framebuffer_size_callback);
+    glfwSetWindowCloseCallback(main_window, glfw_window_close_callback);
+    glfwSetKeyCallback(main_window, glfw_key_callback);
+    glfwSetCharCallback(main_window, glfw_char_callback);
+    glfwSetMouseButtonCallback(main_window, glfw_mouse_button_callback);
 
     glfwSwapInterval(VSYNC_ENABLED);
 
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
         LOG_FATAL("failed to load opengl");
-        glfwDestroyWindow(window);
+        glfwDestroyWindow(main_window);
         glfwTerminate();
         exit(EXIT_FAILURE);
     }
@@ -731,8 +750,15 @@ int main(int argc, char *argv[])
 
     chat_init();
 
+    event_system_register(EVENT_CODE_CHAR_PRESSED, chat_char_pressed_event_callback);
+    event_system_register(EVENT_CODE_KEY_PRESSED, chat_key_pressed_event_callback);
+    event_system_register(EVENT_CODE_KEY_REPEATED, chat_key_repeated_event_callback);
+
     event_system_register(EVENT_CODE_KEY_PRESSED, key_pressed_event_callback);
     event_system_register(EVENT_CODE_KEY_RELEASED, key_released_event_callback);
+
+    event_system_register(EVENT_CODE_MOUSE_BUTTON_PRESSED, chat_mouse_button_pressed_event_callback);
+
     event_system_register(EVENT_CODE_WINDOW_CLOSED, window_closed_event_callback);
     event_system_register(EVENT_CODE_WINDOW_RESIZED, window_resized_event_callback);
 
@@ -821,12 +847,10 @@ int main(int argc, char *argv[])
 
         display_build_version();
 
-        if (chat_visible) {
-            chat_render();
-        }
+        chat_render();
 
         glfwPollEvents();
-        glfwSwapBuffers(window);
+        glfwSwapBuffers(main_window);
     }
 
     LOG_INFO("client shutting down");
@@ -841,8 +865,15 @@ int main(int argc, char *argv[])
 
     LOG_INFO("removed self from players");
 
+    event_system_unregister(EVENT_CODE_CHAR_PRESSED, chat_char_pressed_event_callback);
+    event_system_unregister(EVENT_CODE_KEY_PRESSED, chat_key_pressed_event_callback);
+    event_system_unregister(EVENT_CODE_KEY_REPEATED, chat_key_repeated_event_callback);
+
     event_system_unregister(EVENT_CODE_KEY_PRESSED, key_pressed_event_callback);
     event_system_unregister(EVENT_CODE_KEY_RELEASED, key_released_event_callback);
+
+    event_system_unregister(EVENT_CODE_MOUSE_BUTTON_PRESSED, chat_mouse_button_pressed_event_callback);
+
     event_system_unregister(EVENT_CODE_WINDOW_CLOSED, window_closed_event_callback);
     event_system_unregister(EVENT_CODE_WINDOW_RESIZED, window_resized_event_callback);
 
@@ -856,7 +887,7 @@ int main(int argc, char *argv[])
     shader_destroy(&flat_color_shader);
 
     LOG_INFO("shutting down glfw");
-    glfwDestroyWindow(window);
+    glfwDestroyWindow(main_window);
     glfwTerminate();
 
     pthread_kill(network_thread, SIGINT);

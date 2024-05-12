@@ -129,10 +129,20 @@ typedef enum {
 
 typedef enum {
     // equivalent to glfw action codes
-    KEYACTION_Release = 0,
-    KEYACTION_Press   = 1,
-    KEYACTION_Repeat  = 2
-} keyaction_e;
+    INPUTACTION_Release = 0,
+    INPUTACTION_Press   = 1,
+    INPUTACTION_Repeat  = 2
+} input_action_e;
+
+typedef enum {
+    // equivalent to glfw mod codes
+    KEYMOD_SHIFT      = 0x0001,
+    KEYMOD_CONTROL    = 0x0002,
+    KEYMOD_ALT        = 0x0004,
+    KEYMOD_SUPER      = 0x0008,
+    KEYMOD_CAPS_LOCK  = 0x0010,
+    KEYMOD_NUM_LOCK   = 0x0020,
+} keymod_e;
 
 typedef enum {
     // equivalent to glfw mouse button codes

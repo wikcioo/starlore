@@ -8,22 +8,29 @@ typedef enum {
 
     // data usage:
     //   u16 key = data.u16[0]
+    //   u16 mods = data.u16[1]
     EVENT_CODE_KEY_PRESSED,
 
     // data usage:
     //   u16 key = data.u16[0]
+    //   u16 mods = data.u16[1]
     EVENT_CODE_KEY_RELEASED,
 
     // data usage:
     //   u16 key = data.u16[0]
+    //   u16 mods = data.u16[1]
     EVENT_CODE_KEY_REPEATED,
 
     // data usage:
-    //   u16 btn = data.u8[0]
+    //   u32 character = data.u32[0]
+    EVENT_CODE_CHAR_PRESSED,
+
+    // data usage:
+    //   u8 btn = data.u8[0]
     EVENT_CODE_MOUSE_BUTTON_PRESSED,
 
     // data usage:
-    //   u16 btn = data.u8[0]
+    //   u8 btn = data.u8[0]
     EVENT_CODE_MOUSE_BUTTON_RELEASED,
 
     // data usage:

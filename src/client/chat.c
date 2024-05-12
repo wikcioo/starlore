@@ -3,14 +3,21 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "input.h"
 #include "renderer.h"
 #include "color_palette.h"
+#include "common/input_codes.h"
 #include "common/strings.h"
 #include "common/asserts.h"
 #include "common/logger.h"
 #include "common/containers/darray.h"
 
-#define MAX_MESSAGE_LENGTH (MAX_PLAYER_NAME_LENGTH + MAX_MESSAGE_CONTENT_LENGTH)
+#define MAX_INPUT_BUFFER_LENGTH (MAX_MESSAGE_CONTENT_LENGTH - 5)
+
+typedef enum {
+    CURSOR_DIR_LEFT,
+    CURSOR_DIR_RIGHT
+} cursor_dir_e;
 
 static const f32 xoffset = 5.0f;
 static const f32 yoffset = 5.0f;
@@ -19,18 +26,29 @@ static const f32 height = 250.0f;
 static const f32 gap = 5.0f;
 static const f32 padding = 5.0f;
 
-extern char username[MAX_PLAYER_NAME_LENGTH];
+static b8 is_visible = true;
+static b8 is_input_focused = false;
 
-font_atlas_size_e fa = FA16;
-u32 font_height;
-u32 font_width;
-u32 num_chars_per_row;
-f32 input_box_height;
-f32 total_num_rows;
+static u32 text_offset;
+static u32 cursor_offset;
+
+static u32 input_count;
+static char input_buffer[MAX_INPUT_BUFFER_LENGTH];
+
+extern vec2 current_window_size;
+extern char username[MAX_PLAYER_NAME_LENGTH];
+extern i32 client_socket;
+
+static font_atlas_size_e fa = FA16;
+static u32 font_height;
+static u32 font_width;
+static u32 num_chars_per_row;
+static f32 input_box_height;
+static f32 total_num_rows;
 
 typedef struct {
     vec3 color;
-    char data[MAX_MESSAGE_LENGTH];
+    char data[MAX_PLAYER_NAME_LENGTH + MAX_MESSAGE_CONTENT_LENGTH];
 } message_t;
 
 static message_t *messages;
@@ -48,6 +66,193 @@ void chat_init(void)
 void chat_shutdown(void)
 {
     darray_destroy(messages);
+}
+
+static b8 insert_char(char c)
+{
+    if (input_count >= MAX_INPUT_BUFFER_LENGTH) {
+        return false;
+    }
+
+    if (input_count >= num_chars_per_row && cursor_offset == input_count) {
+        text_offset++;
+    }
+
+    if (cursor_offset == input_count) {
+        input_buffer[input_count] = c;
+    } else {
+        memcpy(input_buffer + cursor_offset + 1, input_buffer + cursor_offset, input_count - cursor_offset);
+        memcpy(input_buffer + cursor_offset, &c, 1);
+    }
+
+    if (text_offset + num_chars_per_row == cursor_offset) {
+        text_offset++;
+    }
+    input_count++;
+    cursor_offset++;
+
+    return true;
+}
+
+static b8 remove_char(void)
+{
+    if (cursor_offset < 1 || input_count < 1) {
+        return false;
+    }
+
+    if (text_offset > 0) {
+        text_offset--;
+    }
+
+    if (cursor_offset == input_count) {
+        input_buffer[input_count - 1] = '\0';
+    } else {
+        memcpy(input_buffer + cursor_offset - 1, input_buffer + cursor_offset, input_count - cursor_offset);
+        input_buffer[input_count - 1] = '\0';
+    }
+
+    cursor_offset--;
+    input_count--;
+
+    return true;
+}
+
+static void move_cursor(cursor_dir_e dir)
+{
+    if (dir == CURSOR_DIR_LEFT && cursor_offset > 0) {
+        if (cursor_offset <= text_offset) {
+            text_offset--;
+        }
+        cursor_offset--;
+    } else if (dir == CURSOR_DIR_RIGHT) {
+        if (cursor_offset < input_count) {
+            cursor_offset++;
+            if (cursor_offset > text_offset + num_chars_per_row) {
+                text_offset++;
+            }
+        }
+    }
+}
+
+b8 chat_key_pressed_event_callback(event_code_e code, event_data_t data)
+{
+    u16 key = data.u16[0];
+    u16 mods = data.u16[1];
+
+    if (key == KEYCODE_T && !is_input_focused) {
+        is_visible = !is_visible;
+        return true;
+    }
+
+    if (is_visible && key == KEYCODE_L && mods & KEYMOD_CONTROL) {
+        is_input_focused = true;
+        return true;
+    }
+
+    if (!is_input_focused) {
+        return false;
+    }
+
+    if (key == KEYCODE_Enter) {
+        b8 parsed_successfully = false;
+        if (input_buffer[0] == '/') {
+            if (strcmp(&input_buffer[1], "whoami") == 0) {
+                chat_add_system_message(username);
+                parsed_successfully = true;
+            }
+        } else {
+            char *input_trimmed = string_trim(input_buffer);
+            if (strlen(input_trimmed) > 0) {
+                u32 input_trimmed_length = strlen(input_trimmed);
+
+                packet_message_t message_packet = {0};
+                message_packet.type = MESSAGE_TYPE_PLAYER;
+                u32 username_size = strlen(username) > MAX_PLAYER_NAME_LENGTH ? MAX_PLAYER_NAME_LENGTH : strlen(username);
+                strncpy(message_packet.author, username, username_size);
+                u32 content_size = input_trimmed_length > MAX_INPUT_BUFFER_LENGTH ? MAX_INPUT_BUFFER_LENGTH : input_trimmed_length;
+                strncpy(message_packet.content, input_trimmed, content_size);
+
+                if (!packet_send(client_socket, PACKET_TYPE_MESSAGE, &message_packet)) {
+                    LOG_ERROR("failed to send message packet");
+                }
+                parsed_successfully = true;
+            }
+        }
+
+        if (parsed_successfully) {
+            memset(input_buffer, 0, input_count);
+            input_count = 0;
+            cursor_offset = 0;
+            text_offset = 0;
+        }
+
+        return true;
+    } else if (key == KEYCODE_Escape) {
+        is_input_focused = false;
+        return true;
+    } else if (key == KEYCODE_Backspace) {
+        remove_char();
+    } else if (key == KEYCODE_Left) {
+        move_cursor(CURSOR_DIR_LEFT);
+        return true;
+    } else if (key == KEYCODE_Right) {
+        move_cursor(CURSOR_DIR_RIGHT);
+        return true;
+    } else if (key >= KEYCODE_Space && key <= KEYCODE_GraveAccent) {
+        return true;
+    }
+
+    return false;
+}
+
+b8 chat_key_repeated_event_callback(event_code_e code, event_data_t data)
+{
+    u16 key = data.u16[0];
+    if (key == KEYCODE_Backspace && is_visible && is_input_focused) {
+        remove_char();
+        return true;
+    } else if (key == KEYCODE_Left) {
+        move_cursor(CURSOR_DIR_LEFT);
+        return true;
+    } else if (key == KEYCODE_Right) {
+        move_cursor(CURSOR_DIR_RIGHT);
+        return true;
+    }
+
+    return false;
+}
+
+b8 chat_char_pressed_event_callback(event_code_e code, event_data_t data)
+{
+    if (!is_input_focused) {
+        return false;
+    }
+
+    insert_char(data.u32[0]);
+    return true;
+}
+
+b8 chat_mouse_button_pressed_event_callback(event_code_e code, event_data_t data)
+{
+    if (!is_visible) {
+        return false;
+    }
+
+    if (data.u8[0] == MOUSEBUTTON_LEFT) {
+        vec2 mouse_pos = input_get_mouse_position();
+        mouse_pos.y = current_window_size.y - mouse_pos.y;
+
+        if (xoffset <= mouse_pos.x && mouse_pos.x <= xoffset + width &&
+            yoffset <= mouse_pos.y && mouse_pos.y <= yoffset + input_box_height) {
+            is_input_focused = true;
+            return true;
+        } else {
+            is_input_focused = false;
+            return false;
+        }
+    }
+
+    return false;
 }
 
 void chat_add_player_message(chat_player_message_t message)
@@ -86,17 +291,47 @@ static void chat_render_next_row(const char *str, u32 length, u32 offset, vec3 c
 // NOTE: Works for monospaced font only
 void chat_render(void)
 {
+    if (!is_visible) {
+        return;
+    }
+
     // Draw input box background
-    renderer_draw_quad(vec2_create(xoffset + width/2, yoffset + font_height/2 + padding),
+    renderer_draw_quad(vec2_create(xoffset + width/2, yoffset + input_box_height/2),
                        vec2_create(width, input_box_height),
-                       0.0f,
-                       COLOR_BLACK, 0.3f);
+                       0.0f, is_input_focused ? COLOR_LIME_GREEN : COLOR_BLACK, 0.3f);
+
+    if (input_count > 0) {
+        // Draw characters from input buffer on the input box
+        vec2 chars_pos = vec2_create(
+            xoffset + padding,
+            math_ceil(yoffset + input_box_height/2 - font_height/2)
+        );
+        if (input_count > num_chars_per_row) {
+            char buffer[MAX_INPUT_BUFFER_LENGTH] = {0};
+            memcpy(buffer, input_buffer + text_offset, num_chars_per_row);
+            renderer_draw_text(buffer, fa, chars_pos, 1.0f, COLOR_MILK, 1.0f);
+        } else {
+            renderer_draw_text(input_buffer, fa, chars_pos, 1.0f, COLOR_MILK, 1.0f);
+        }
+    }
+
+    // Draw cursor if input box focused
+    if (is_input_focused) {
+        vec2 cursor_position = vec2_create(
+            xoffset + padding + ((cursor_offset - text_offset) * font_width) + 1.0f,
+            yoffset + input_box_height/2
+        );
+        vec2 cursor_size = vec2_create(
+            1.0f,
+            font_height
+        );
+        renderer_draw_quad(cursor_position, cursor_size, 0.0f, COLOR_MILK, 1.0f);
+    }
 
     // Draw messages box background
-    renderer_draw_quad(vec2_create(xoffset + width/2, yoffset + height/2 + input_box_height + gap),
+    renderer_draw_quad(vec2_create(xoffset + width/2, yoffset + input_box_height + gap + height/2),
                        vec2_create(width, height),
-                       0.0f,
-                       COLOR_BLACK, 0.3f);
+                       0.0f, COLOR_BLACK, 0.3f);
 
     // Draw messages
     u64 messages_length = darray_length(messages);
