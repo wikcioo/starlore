@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "input.h"
+#include "window.h"
 #include "renderer.h"
 #include "color_palette.h"
 #include "common/input_codes.h"
@@ -35,7 +36,6 @@ static u32 cursor_offset;
 static u32 input_count;
 static char input_buffer[MAX_INPUT_BUFFER_LENGTH];
 
-extern vec2 current_window_size;
 extern char username[MAX_PLAYER_NAME_LENGTH];
 extern i32 client_socket;
 
@@ -240,7 +240,7 @@ b8 chat_mouse_button_pressed_event_callback(event_code_e code, event_data_t data
 
     if (data.u8[0] == MOUSEBUTTON_LEFT) {
         vec2 mouse_pos = input_get_mouse_position();
-        mouse_pos.y = current_window_size.y - mouse_pos.y;
+        mouse_pos.y = window_get_size().y - mouse_pos.y;
 
         if (xoffset <= mouse_pos.x && mouse_pos.x <= xoffset + width &&
             yoffset <= mouse_pos.y && mouse_pos.y <= yoffset + input_box_height) {

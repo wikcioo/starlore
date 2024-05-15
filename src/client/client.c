@@ -21,6 +21,7 @@
 #include "renderer.h"
 #include "event.h"
 #include "chat.h"
+#include "window.h"
 #include "color_palette.h"
 #include "common/asserts.h"
 #include "common/strings.h"
@@ -63,9 +64,7 @@ static u32 current_sequence_number = 1;
 
 // Data referenced from somewhere else
 char username[MAX_PLAYER_NAME_LENGTH];
-vec2 current_window_size;
 i32 client_socket;
-GLFWwindow *main_window;
 
 texture_t player_texture;
 
@@ -424,48 +423,6 @@ void *handle_networking(void *args)
     return NULL;
 }
 
-void glfw_error_callback(i32 code, const char *description)
-{
-    LOG_ERROR("glfw error code: %d (%s)", code, description);
-}
-
-void glfw_framebuffer_size_callback(GLFWwindow *window, i32 width, i32 height)
-{
-    event_system_fire(EVENT_CODE_WINDOW_RESIZED, (event_data_t){ .u32[0]=width, .u32[1]=height });
-}
-
-void glfw_window_close_callback(GLFWwindow *window)
-{
-    event_system_fire(EVENT_CODE_WINDOW_CLOSED, (event_data_t){0});
-}
-
-void glfw_key_callback(GLFWwindow *window, i32 key, i32 scancode, i32 action, i32 mods)
-{
-    event_data_t data = {0};
-    data.u16[0] = key;
-    data.u16[1] = mods;
-
-    if (action == INPUTACTION_Press) {
-        event_system_fire(EVENT_CODE_KEY_PRESSED, data);
-    } else if (action == INPUTACTION_Release) {
-        event_system_fire(EVENT_CODE_KEY_RELEASED, data);
-    } else if (action == INPUTACTION_Repeat) {
-        event_system_fire(EVENT_CODE_KEY_REPEATED, data);
-    }
-}
-
-void glfw_char_callback(GLFWwindow *window, u32 codepoint)
-{
-    event_system_fire(EVENT_CODE_CHAR_PRESSED, (event_data_t){ .u32[0]=codepoint });
-}
-
-void glfw_mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
-{
-    if (action == INPUTACTION_Press) {
-        event_system_fire(EVENT_CODE_MOUSE_BUTTON_PRESSED, (event_data_t){ .u8[0]=button });
-    }
-}
-
 b8 key_pressed_event_callback(event_code_e code, event_data_t data)
 {
     u16 key = data.u16[0];
@@ -489,15 +446,6 @@ b8 window_closed_event_callback(event_code_e code, event_data_t data)
 {
     running = false;
     return true;
-}
-
-b8 window_resized_event_callback(event_code_e code, event_data_t data)
-{
-    u32 width = data.u32[0];
-    u32 height = data.u32[1];
-    current_window_size = vec2_create(width, height);
-    glViewport(0, 0, width, height);
-    return false;
 }
 
 void update_self_player(f64 delta_time)
@@ -561,7 +509,7 @@ void display_build_version(void)
 {
     renderer_draw_text(BUILD_VERSION(CLIENT_VERSION_MAJOR, CLIENT_VERSION_MINOR, CLIENT_VERSION_PATCH),
                        FA32,
-                       vec2_create(3.0f, current_window_size.y - renderer_get_font_height(FA32)),
+                       vec2_create(3.0f, window_get_size().y - renderer_get_font_height(FA32)),
                        1.0f,
                        COLOR_MILK,
                        0.6f);
@@ -576,47 +524,10 @@ int main(int argc, char *argv[])
 
     memcpy(username, argv[3], strlen(argv[3]));
 
-    if (glfwInit() != GLFW_TRUE) {
-        LOG_FATAL("failed to initialize glfw");
+    if (!window_create(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT, "The Game")) {
+        LOG_ERROR("failed to create window");
         exit(EXIT_FAILURE);
     }
-
-    glfwSetErrorCallback(glfw_error_callback);
-
-    main_window = glfwCreateWindow(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT, "Chat Client", NULL, NULL);
-    if (main_window == NULL) {
-        LOG_FATAL("failed to create glfw window");
-        glfwTerminate();
-        exit(EXIT_FAILURE);
-    }
-
-    current_window_size = vec2_create((f32)DEFAULT_WINDOW_WIDTH, (f32)DEFAULT_WINDOW_HEIGHT);
-
-    glfwMakeContextCurrent(main_window);
-    glfwSetFramebufferSizeCallback(main_window, glfw_framebuffer_size_callback);
-    glfwSetWindowCloseCallback(main_window, glfw_window_close_callback);
-    glfwSetKeyCallback(main_window, glfw_key_callback);
-    glfwSetCharCallback(main_window, glfw_char_callback);
-    glfwSetMouseButtonCallback(main_window, glfw_mouse_button_callback);
-
-    glfwSwapInterval(VSYNC_ENABLED);
-
-    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
-        LOG_FATAL("failed to load opengl");
-        glfwDestroyWindow(main_window);
-        glfwTerminate();
-        exit(EXIT_FAILURE);
-    }
-
-    const GLFWvidmode *vidmode = glfwGetVideoMode(glfwGetPrimaryMonitor());
-    LOG_INFO("primary monitor parameters:\n\t  width: %d\n\t  height: %d\n\t  refresh rate: %d",
-             vidmode->width, vidmode->height, vidmode->refreshRate);
-
-    LOG_INFO("graphics info:\n\t  vendor: %s\n\t  renderer: %s\n\t  version: %s",
-             glGetString(GL_VENDOR), glGetString(GL_RENDERER), glGetString(GL_VERSION));
-    LOG_INFO("running opengl version %d.%d", GLVersion.major, GLVersion.minor);
-    LOG_INFO("running glfw version %s", glfwGetVersionString());
-    LOG_INFO("vsync: %s", VSYNC_ENABLED ? "on" : "off");
 
     if (!event_system_init()) {
         LOG_ERROR("failed to initialize event system");
@@ -700,7 +611,6 @@ int main(int argc, char *argv[])
     event_system_register(EVENT_CODE_MOUSE_BUTTON_PRESSED, chat_mouse_button_pressed_event_callback);
 
     event_system_register(EVENT_CODE_WINDOW_CLOSED, window_closed_event_callback);
-    event_system_register(EVENT_CODE_WINDOW_RESIZED, window_resized_event_callback);
 
     pthread_t network_thread;
     pthread_create(&network_thread, NULL, handle_networking, NULL);
@@ -772,8 +682,8 @@ int main(int argc, char *argv[])
 
         chat_render();
 
-        glfwPollEvents();
-        glfwSwapBuffers(main_window);
+        window_poll_events();
+        window_swap_buffers();
     }
 
     LOG_INFO("client shutting down");
@@ -800,15 +710,13 @@ int main(int argc, char *argv[])
     event_system_unregister(EVENT_CODE_MOUSE_BUTTON_PRESSED, chat_mouse_button_pressed_event_callback);
 
     event_system_unregister(EVENT_CODE_WINDOW_CLOSED, window_closed_event_callback);
-    event_system_unregister(EVENT_CODE_WINDOW_RESIZED, window_resized_event_callback);
 
     chat_shutdown();
     renderer_shutdown();
     event_system_shutdown();
 
-    LOG_INFO("shutting down glfw");
-    glfwDestroyWindow(main_window);
-    glfwTerminate();
+    LOG_INFO("destroying main window");
+    window_destroy();
 
     pthread_kill(network_thread, SIGINT);
     pthread_join(network_thread, NULL);
