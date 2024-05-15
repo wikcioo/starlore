@@ -16,15 +16,15 @@
 #include <GLFW/glfw3.h>
 
 #include "version.h"
+#include "config.h"
 #include "defines.h"
-#include "shader.h"
 #include "renderer.h"
 #include "event.h"
 #include "chat.h"
 #include "color_palette.h"
 #include "common/asserts.h"
 #include "common/strings.h"
-#include "common/config.h"
+#include "common/global.h"
 #include "common/packet.h"
 #include "common/logger.h"
 #include "common/maths.h"
@@ -37,26 +37,12 @@
 #define RING_BUFFER_CAPACITY 256
 #define POLL_INFINITE_TIMEOUT -1
 
-#define CLIENT_TICK_RATE 64
 #define CLIENT_TICK_DURATION (1.0f / CLIENT_TICK_RATE)
-
 #define SERVER_TICK_DURATION (1.0f / SERVER_TICK_RATE)
-
-#define WINDOW_WIDTH 1280
-#define WINDOW_HEIGHT 720
-
-#define VSYNC_ENABLED 1
-
-#if defined(DEBUG)
-    #define BUILD_MODE_STR "debug"
-#else
-    #define BUILD_MODE_STR "release"
-#endif
-
-#define BUILD_VERSION(major,minor,patch) BUILD_MODE_STR" v"STRINGIFY(major)"."STRINGIFY(minor)"."STRINGIFY(patch)
 
 typedef struct {
     player_id id;
+    char name[MAX_PLAYER_NAME_LENGTH];
     vec2 position;
     vec2 last_position; // Used for interpolation
     b8 interp_complete;
@@ -74,14 +60,14 @@ static u32 input_count = 0;
 static b8 running = false;
 static void *ring_buffer;
 static u32 current_sequence_number = 1;
-static shader_t flat_color_shader;
 
 // Data referenced from somewhere else
 char username[MAX_PLAYER_NAME_LENGTH];
-mat4 ortho_projection;
 vec2 current_window_size;
 i32 client_socket;
 GLFWwindow *main_window;
+
+texture_t player_texture;
 
 b8 handle_client_validation(i32 client)
 {
@@ -310,6 +296,7 @@ void handle_socket_event(void)
                         other_players[i].color           = player_add->color;
                         other_players[i].last_position   = player_add->position;
                         other_players[i].interp_complete = true;
+                        memcpy(other_players[i].name, player_add->name, strlen(player_add->name));
                         other_player_count++;
                         found_free_slot = true;
                         break;
@@ -509,15 +496,8 @@ b8 window_resized_event_callback(event_code_e code, event_data_t data)
     u32 width = data.u32[0];
     u32 height = data.u32[1];
     current_window_size = vec2_create(width, height);
-    ortho_projection = mat4_orthographic(0.0f, current_window_size.x, 0.0f, current_window_size.y, -1.0f, 1.0f);
-
-    shader_bind(&flat_color_shader);
-    shader_set_uniform_mat4(&flat_color_shader, "u_projection", &ortho_projection);
-    shader_unbind(&flat_color_shader);
-
     glViewport(0, 0, width, height);
-
-    return true;
+    return false;
 }
 
 void update_self_player(f64 delta_time)
@@ -603,15 +583,14 @@ int main(int argc, char *argv[])
 
     glfwSetErrorCallback(glfw_error_callback);
 
-    main_window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Chat Client", NULL, NULL);
+    main_window = glfwCreateWindow(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT, "Chat Client", NULL, NULL);
     if (main_window == NULL) {
         LOG_FATAL("failed to create glfw window");
         glfwTerminate();
         exit(EXIT_FAILURE);
     }
 
-    current_window_size = vec2_create((f32)WINDOW_WIDTH, (f32)WINDOW_HEIGHT);
-    ortho_projection = mat4_orthographic(0.0f, current_window_size.x, 0.0f, current_window_size.y, -1.0f, 1.0f);
+    current_window_size = vec2_create((f32)DEFAULT_WINDOW_WIDTH, (f32)DEFAULT_WINDOW_HEIGHT);
 
     glfwMakeContextCurrent(main_window);
     glfwSetFramebufferSizeCallback(main_window, glfw_framebuffer_size_callback);
@@ -638,47 +617,6 @@ int main(int argc, char *argv[])
     LOG_INFO("running opengl version %d.%d", GLVersion.major, GLVersion.minor);
     LOG_INFO("running glfw version %s", glfwGetVersionString());
     LOG_INFO("vsync: %s", VSYNC_ENABLED ? "on" : "off");
-
-    shader_create_info_t create_info;
-    create_info.vertex_filepath = "assets/shaders/flat_color.vert";
-    create_info.fragment_filepath = "assets/shaders/flat_color.frag";
-
-    if (shader_create(&create_info, &flat_color_shader)) {
-        LOG_INFO("compiled flat_color_shader");
-    }
-    shader_bind(&flat_color_shader);
-    shader_set_uniform_mat4(&flat_color_shader, "u_projection", &ortho_projection);
-    shader_unbind(&flat_color_shader);
-
-    i32 tile_size = 32;
-    f32 vertices[] = { // 32px x 32px square centered around centroid
-        -tile_size / 2.0f, -tile_size / 2.0f,
-        -tile_size / 2.0f,  tile_size / 2.0f,
-         tile_size / 2.0f,  tile_size / 2.0f,
-         tile_size / 2.0f, -tile_size / 2.0f,
-    };
-
-    u32 indices[] = {
-        0, 1, 2,
-        2, 3, 0
-    };
-
-    u32 vao;
-    glGenVertexArrays(1, &vao);
-    glBindVertexArray(vao);
-
-    u32 vbo;
-    glGenBuffers(1, &vbo);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), (void *)vertices, GL_STATIC_DRAW);
-
-    u32 ibo;
-    glGenBuffers(1, &ibo);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), (void *)indices, GL_STATIC_DRAW);
-
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(f32), 0);
 
     if (!event_system_init()) {
         LOG_ERROR("failed to initialize event system");
@@ -750,6 +688,8 @@ int main(int argc, char *argv[])
 
     chat_init();
 
+    texture_create_from_path("assets/textures/old_man.png", &player_texture);
+
     event_system_register(EVENT_CODE_CHAR_PRESSED, chat_char_pressed_event_callback);
     event_system_register(EVENT_CODE_KEY_PRESSED, chat_key_pressed_event_callback);
     event_system_register(EVENT_CODE_KEY_REPEATED, chat_key_repeated_event_callback);
@@ -764,9 +704,6 @@ int main(int argc, char *argv[])
 
     pthread_t network_thread;
     pthread_create(&network_thread, NULL, handle_networking, NULL);
-
-    f32 rotation_angle = 0.0f;
-    f32 scale_factor = 1.0f;
 
     f64 last_time = glfwGetTime();
     f64 delta_time = 0.0f;
@@ -788,33 +725,22 @@ int main(int argc, char *argv[])
             client_update_accumulator = 0.0f;
         }
 
-        glClearColor(0.3f, 0.5f, 0.9f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
-
-        shader_bind(&flat_color_shader);
-
-        glBindVertexArray(vao);
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo);
+        renderer_clear_screen(vec4_create(0.3f, 0.5f, 0.9f, 1.0f));
 
         if (self_player.id != PLAYER_INVALID_ID) {
-            /* Draw ourselves */
-            mat4 translation = mat4_translate(self_player.position);
-            mat4 rotation = mat4_rotate(rotation_angle);
-            mat4 scale = mat4_scale(vec2_create(scale_factor, scale_factor));
-            mat4 model = mat4_multiply(translation, mat4_multiply(rotation, scale));
-
-            shader_set_uniform_mat4(&flat_color_shader, "u_model", &model);
-            vec4 player_color = vec4_create_from_vec3(self_player.color, 1.0f);
-            shader_set_uniform_vec4(&flat_color_shader, "u_color", &player_color);
-
-            glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, NULL);
+            vec2 username_position = vec2_create(
+                self_player.position.x - (renderer_get_font_width(FA16) * strlen(username))/2,
+                self_player.position.y + player_texture.height/2
+            );
+            renderer_draw_text(username, FA16, username_position, 1.0f, COLOR_MILK, 1.0f);
+            renderer_draw_sprite(&player_texture, self_player.position, 1.0f, 0.0f);
         }
 
         /* Draw all other players */
         f32 server_update_accumulator_copy = server_update_accumulator;
         for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
             if (other_players[i].id != PLAYER_INVALID_ID) {
-                mat4 translation;
+                vec2 position;
                 if (!other_players[i].interp_complete) {
                     // Interpolate player's position based on the current and last position and time since last server update
                     f32 t = server_update_accumulator_copy / SERVER_TICK_DURATION;
@@ -828,20 +754,17 @@ int main(int argc, char *argv[])
                         .y = math_lerpf(other_players[i].last_position.y, other_players[i].position.y, t)
                     };
 
-                    translation = mat4_translate(player_position);
+                    position = player_position;
                 } else {
-                    translation = mat4_translate(other_players[i].position);
+                    position = other_players[i].position;
                 }
 
-                mat4 rotation = mat4_rotate(rotation_angle);
-                mat4 scale = mat4_scale(vec2_create(scale_factor, scale_factor));
-                mat4 model = mat4_multiply(translation, mat4_multiply(rotation, scale));
-
-                shader_set_uniform_mat4(&flat_color_shader, "u_model", &model);
-                vec4 player_color = vec4_create_from_vec3(other_players[i].color, 1.0f);
-                shader_set_uniform_vec4(&flat_color_shader, "u_color", &player_color);
-
-                glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, NULL);
+                vec2 username_position = vec2_create(
+                    position.x - (renderer_get_font_width(FA16) * strlen(other_players[i].name))/2,
+                    position.y + player_texture.height/2
+                );
+                renderer_draw_text(other_players[i].name, FA16, username_position, 1.0f, COLOR_MILK, 1.0f);
+                renderer_draw_sprite(&player_texture, position, 1.0f, 0.0f);
             }
         }
 
@@ -865,6 +788,8 @@ int main(int argc, char *argv[])
 
     LOG_INFO("removed self from players");
 
+    texture_destroy(&player_texture);
+
     event_system_unregister(EVENT_CODE_CHAR_PRESSED, chat_char_pressed_event_callback);
     event_system_unregister(EVENT_CODE_KEY_PRESSED, chat_key_pressed_event_callback);
     event_system_unregister(EVENT_CODE_KEY_REPEATED, chat_key_repeated_event_callback);
@@ -880,11 +805,6 @@ int main(int argc, char *argv[])
     chat_shutdown();
     renderer_shutdown();
     event_system_shutdown();
-
-    glDeleteBuffers(1, &vbo);
-    glDeleteVertexArrays(1, &vao);
-
-    shader_destroy(&flat_color_shader);
 
     LOG_INFO("shutting down glfw");
     glfwDestroyWindow(main_window);

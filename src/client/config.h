@@ -1,0 +1,8 @@
+#pragma once
+
+#define DEFAULT_WINDOW_WIDTH 1280
+#define DEFAULT_WINDOW_HEIGHT 720
+
+#define VSYNC_ENABLED 1
+
+#define CLIENT_TICK_RATE 64

@@ -14,7 +14,7 @@
 #include <pthread.h>
 
 #include "defines.h"
-#include "common/config.h"
+#include "common/global.h"
 #include "common/packet.h"
 #include "common/logger.h"
 #include "common/asserts.h"
@@ -230,6 +230,8 @@ void handle_new_player_connection(i32 client_socket)
                 .position = players[i].position,
                 .color    = players[i].color
             };
+            memcpy(player_add_packet.name, players[i].name, strlen(players[i].name));
+
             if (!packet_send(client_socket, PACKET_TYPE_PLAYER_ADD, &player_add_packet)) {
                 LOG_ERROR("failed to send player add packet");
             }
@@ -279,6 +281,8 @@ void handle_new_player_connection(i32 client_socket)
                     .position = player_init_packet.position,
                     .color    = player_init_packet.color
                 };
+                memcpy(player_add_packet.name, players[new_player_idx].name, strlen(players[new_player_idx].name));
+
                 if (!packet_send(players[i].socket, PACKET_TYPE_PLAYER_ADD, &player_add_packet)) {
                     LOG_ERROR("failed to send player add packet");
                 }

@@ -4,6 +4,7 @@
             "name": "Linux",
             "includePath": [
                 "${workspaceFolder}/src",
+                "${workspaceFolder}/src/vendor",
                 "${workspaceFolder}/src/vendor/glad/include",
                 "/usr/include/freetype2"
             ],

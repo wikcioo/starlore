@@ -7,16 +7,14 @@
 
 #include "defines.h"
 #include "shader.h"
+#include "config.h"
 #include "color_palette.h"
 #include "common/logger.h"
 #include "common/asserts.h"
 
-static const char *monogram_font_filepath = "assets/fonts/monogram.ttf";
-
-extern mat4 ortho_projection;
+#define MONOGRAM_FONT_FILEPATH "assets/fonts/monogram.ttf"
 
 typedef struct {
-    shader_t shader;
     u32 vao;
     u32 vbo;
 } font_data_t;
@@ -36,19 +34,24 @@ typedef struct {
 } font_atlas_t;
 
 typedef struct {
-    shader_t shader;
     u32 vao;
     u32 vbo;
     u32 ibo;
 } quad_data_t;
 
+static shader_t font_shader;
+static shader_t quad_shader;
+
 static font_data_t font_data;
 static font_atlas_t font_atlases[FA_COUNT];
 
+static texture_t white_texture;
 static quad_data_t quad_data;
 
 static FT_Library ft;
 static FT_Face face;
+
+static mat4 ortho_projection;
 
 static void create_font_atlas(FT_Face ft_face, u32 height, font_atlas_t *out_atlas)
 {
@@ -106,21 +109,8 @@ static void create_font_atlas(FT_Face ft_face, u32 height, font_atlas_t *out_atl
     }
 }
 
-static b8 create_font_data(void)
+static void create_font_data(void)
 {
-    shader_create_info_t create_info = {
-        .vertex_filepath = "assets/shaders/text.vert",
-        .fragment_filepath = "assets/shaders/text.frag"
-    };
-
-    if (!shader_create(&create_info, &font_data.shader)) {
-        LOG_ERROR("failed to create text shader");
-        return false;
-    }
-
-    shader_bind(&font_data.shader);
-    shader_set_uniform_int(&font_data.shader, "u_texture", 0);
-
     glGenVertexArrays(1, &font_data.vao);
     glBindVertexArray(font_data.vao);
 
@@ -132,39 +122,25 @@ static b8 create_font_data(void)
 
     if (FT_Init_FreeType(&ft)) {
         LOG_FATAL("failed to initialize freetype library");
-        return false;
     }
 
-    if (FT_New_Face(ft, monogram_font_filepath, 0, &face)) {
-        LOG_ERROR("failed to load font at %s", monogram_font_filepath);
-        return false;
+    if (FT_New_Face(ft, MONOGRAM_FONT_FILEPATH, 0, &face)) {
+        LOG_ERROR("failed to load font at %s", MONOGRAM_FONT_FILEPATH);
     }
 
     create_font_atlas(face, 16, &font_atlases[FA16]);
     create_font_atlas(face, 32, &font_atlases[FA32]);
     create_font_atlas(face, 64, &font_atlases[FA64]);
     create_font_atlas(face, 128, &font_atlases[FA128]);
-
-    return true;
 }
 
-b8 create_quad_data(void)
+static void create_quad_data(void)
 {
-    shader_create_info_t create_info = {
-        "assets/shaders/flat_color.vert",
-        "assets/shaders/flat_color.frag"
-    };
-
-    if (!shader_create(&create_info, &quad_data.shader)) {
-        LOG_ERROR("failed to create quad shader");
-        return false;
-    }
-
     f32 vertices[] = {
-        -0.5f, -0.5f,
-        -0.5f,  0.5f,
-         0.5f,  0.5f,
-         0.5f, -0.5f
+        -0.5f, -0.5f, 0.0f, 0.0f,
+        -0.5f,  0.5f, 0.0f, 1.0f,
+         0.5f,  0.5f, 1.0f, 1.0f,
+         0.5f, -0.5f, 1.0f, 0.0f
     };
 
     u32 indices[] = {
@@ -184,23 +160,59 @@ b8 create_quad_data(void)
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), (void *)indices, GL_STATIC_DRAW);
 
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(f32), 0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(f32), 0);
 
-    return true;
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(f32), (void *)(2 * sizeof(f32)));
+
+    texture_specification_t spec = {
+        .width = 1,
+        .height = 1,
+        .format = IMAGE_FORMAT_RGBA8,
+        .generate_mipmaps = false
+    };
+    u32 white_image_data = 0xFFFFFFFF;
+    texture_create_from_spec(spec, &white_image_data, &white_texture);
+}
+
+static void create_shaders(void)
+{
+    shader_create_info_t font_shader_create_info = {
+        .vertex_filepath = "assets/shaders/text.vert",
+        .fragment_filepath = "assets/shaders/text.frag"
+    };
+
+    if (!shader_create(&font_shader_create_info, &font_shader)) {
+        LOG_ERROR("failed to create font shader");
+    }
+
+    shader_bind(&font_shader);
+    shader_set_uniform_mat4(&font_shader, "u_projection", &ortho_projection);
+
+    shader_create_info_t quad_shader_create_info = {
+        "assets/shaders/quad.vert",
+        "assets/shaders/quad.frag"
+    };
+
+    if (!shader_create(&quad_shader_create_info, &quad_shader)) {
+        LOG_ERROR("failed to create quad shader");
+    }
+
+    shader_bind(&quad_shader);
+    shader_set_uniform_mat4(&quad_shader, "u_projection", &ortho_projection);
 }
 
 b8 renderer_init(void)
 {
+    event_system_register(EVENT_CODE_WINDOW_RESIZED, renderer_window_resized_event_callback);
+    ortho_projection = mat4_orthographic(0.0f, DEFAULT_WINDOW_WIDTH, 0.0f, DEFAULT_WINDOW_HEIGHT, -1.0f, 1.0f);
+
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    if (!create_font_data()) {
-        return false;
-    }
-
-    if (!create_quad_data()) {
-        return false;
-    }
+    create_font_data();
+    create_quad_data();
+    create_shaders();
 
     return true;
 }
@@ -209,6 +221,21 @@ void renderer_shutdown(void)
 {
     FT_Done_Face(face);
     FT_Done_FreeType(ft);
+
+    shader_destroy(&font_shader);
+    shader_destroy(&quad_shader);
+
+    glDeleteVertexArrays(1, &font_data.vao);
+    glDeleteVertexArrays(1, &quad_data.vao);
+    glDeleteBuffers(1, &font_data.vbo);
+    glDeleteBuffers(1, &quad_data.vbo);
+    glDeleteBuffers(1, &quad_data.ibo);
+}
+
+void renderer_clear_screen(vec4 color)
+{
+    glClearColor(color.r, color.g, color.b, color.a);
+    glClear(GL_COLOR_BUFFER_BIT);
 }
 
 u32 renderer_get_font_height(font_atlas_size_e fa)
@@ -228,9 +255,9 @@ void renderer_draw_text(const char *text, font_atlas_size_e fa_size, vec2 positi
     ASSERT(fa_size < FA_COUNT);
 
     vec4 font_color = vec4_create_from_vec3(color, alpha);
-    shader_bind(&font_data.shader);
-    shader_set_uniform_vec4(&font_data.shader, "u_color", &font_color);
-    shader_set_uniform_mat4(&font_data.shader, "u_projection", &ortho_projection);
+    shader_bind(&font_shader);
+    shader_set_uniform_int(&font_shader, "u_texture", 0);
+    shader_set_uniform_vec4(&font_shader, "u_color", &font_color);
 
     i32 n = 0;
     f32 start_x = position.x;
@@ -286,18 +313,57 @@ void renderer_draw_text(const char *text, font_atlas_size_e fa_size, vec2 positi
 
 void renderer_draw_quad(vec2 position, vec2 size, f32 rotation_angle, vec3 color, f32 alpha)
 {
-    shader_bind(&quad_data.shader);
+    shader_bind(&quad_shader);
     vec4 quad_color = vec4_create_from_vec3(color, alpha);
-    shader_set_uniform_vec4(&quad_data.shader, "u_color", &quad_color);
-    shader_set_uniform_mat4(&quad_data.shader, "u_projection", &ortho_projection);
+    shader_set_uniform_int(&quad_shader, "u_texture", 0);
+    shader_set_uniform_vec4(&quad_shader, "u_color", &quad_color);
 
     mat4 translation = mat4_translate(position);
     mat4 rotation = mat4_rotate(rotation_angle);
     mat4 scale = mat4_scale(size);
-
     mat4 model = mat4_multiply(translation, mat4_multiply(rotation, scale));
-    shader_set_uniform_mat4(&quad_data.shader, "u_model", &model);
+    shader_set_uniform_mat4(&quad_shader, "u_model", &model);
 
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, white_texture.id);
     glBindVertexArray(quad_data.vao);
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, NULL);
+}
+
+void renderer_draw_sprite(texture_t *texture, vec2 position, f32 scale, f32 rotation_angle)
+{
+    renderer_draw_sprite_color(texture, position, scale, rotation_angle, vec3_create(1.0f, 1.0f, 1.0f), 1.0f);
+}
+
+void renderer_draw_sprite_color(texture_t *texture, vec2 position, f32 scale, f32 rotation_angle, vec3 color, f32 alpha)
+{
+    shader_bind(&quad_shader);
+    vec4 quad_color = vec4_create_from_vec3(color, alpha);
+    shader_set_uniform_int(&quad_shader, "u_texture", 0);
+    shader_set_uniform_vec4(&quad_shader, "u_color", &quad_color);
+
+    mat4 translation_matrix = mat4_translate(position);
+    mat4 rotation_matrix = mat4_rotate(rotation_angle);
+    mat4 scale_matrix = mat4_scale(vec2_create(texture->width * scale, texture->height * scale));
+    mat4 model_matrix = mat4_multiply(translation_matrix, mat4_multiply(rotation_matrix, scale_matrix));
+    shader_set_uniform_mat4(&quad_shader, "u_model", &model_matrix);
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, texture->id);
+    glBindVertexArray(quad_data.vao);
+    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, NULL);
+}
+
+b8 renderer_window_resized_event_callback(event_code_e code, event_data_t data)
+{
+    u32 width = data.u32[0];
+    u32 height = data.u32[1];
+    ortho_projection = mat4_orthographic(0.0f, width, 0.0f, height, -1.0f, 1.0f);
+
+    shader_bind(&font_shader);
+    shader_set_uniform_mat4(&font_shader, "u_projection", &ortho_projection);
+    shader_bind(&quad_shader);
+    shader_set_uniform_mat4(&quad_shader, "u_projection", &ortho_projection);
+
+    return false;
 }

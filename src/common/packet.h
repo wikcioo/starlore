@@ -68,6 +68,7 @@ typedef struct {
 
 typedef struct {
     player_id id;
+    char name[MAX_PLAYER_NAME_LENGTH];
     vec2 position;
     vec3 color;
 } packet_player_add_t;
