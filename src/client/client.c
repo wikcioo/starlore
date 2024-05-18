@@ -23,6 +23,7 @@
 #include "chat.h"
 #include "window.h"
 #include "player.h"
+#include "camera.h"
 #include "color_palette.h"
 #include "common/asserts.h"
 #include "common/strings.h"
@@ -53,11 +54,16 @@ static u32 input_count = 0;
 
 static b8 running = false;
 
+static vec2 mouse_position;
+
 // Data referenced from somewhere else
 char username[PLAYER_MAX_NAME_LENGTH];
 i32 client_socket;
+b8 is_camera_locked_on_player = true;
+camera_t ui_camera;
+camera_t game_camera;
 
-b8 handle_client_validation(i32 client)
+static b8 handle_client_validation(i32 client)
 {
     u64 puzzle_buffer;
     i64 bytes_read, bytes_sent;
@@ -101,7 +107,7 @@ b8 handle_client_validation(i32 client)
     return false;
 }
 
-void send_ping_packet(void)
+static void send_ping_packet(void)
 {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -115,7 +121,7 @@ void send_ping_packet(void)
     }
 }
 
-void handle_stdin_event(void)
+static void handle_stdin_event(void)
 {
     char ch;
     if (read(STDIN_FILENO, &ch, 1) == -1) {
@@ -161,7 +167,7 @@ void handle_stdin_event(void)
     }
 }
 
-void handle_socket_event(void)
+static void handle_socket_event(void)
 {
     u8 recv_buffer[INPUT_BUFFER_SIZE + OVERFLOW_BUFFER_SIZE] = {0};
 
@@ -411,7 +417,7 @@ void handle_socket_event(void)
     }
 }
 
-void *handle_networking(void *args)
+static void *handle_networking(void *args)
 {
     while (running) {
         i32 num_events = poll(pfds, POLLFD_COUNT, POLL_INFINITE_TIMEOUT);
@@ -445,29 +451,75 @@ void *handle_networking(void *args)
     return NULL;
 }
 
-b8 key_pressed_event_callback(event_code_e code, event_data_t data)
+static b8 key_pressed_event_callback(event_code_e code, event_data_t data)
 {
     u16 key = data.u16[0];
     if (key == KEYCODE_P) {
         send_ping_packet();
+        return true;
+    } else if (key == KEYCODE_Escape) {
+        window_set_cursor_state(false);
+        return true;
+    } else if (key == KEYCODE_Y) {
+        is_camera_locked_on_player = !is_camera_locked_on_player;
+        if (is_camera_locked_on_player) {
+            vec2 window_size = window_get_size();
+            camera_set_position(&game_camera, vec2_sub(self_player.base.position, vec2_divide(window_size, 2)));
+        }
         return true;
     }
 
     return false;
 }
 
-b8 window_closed_event_callback(event_code_e code, event_data_t data)
+static b8 mouse_button_pressed_event_callback(event_code_e code, event_data_t data)
+{
+    if (!window_is_cursor_captured()) {
+        window_set_cursor_state(true);
+        return true;
+    }
+
+    return false;
+}
+
+static b8 mouse_moved_event_callback(event_code_e code, event_data_t data)
+{
+    f32 xpos = data.f32[0];
+    f32 ypos = data.f32[1];
+
+    mouse_position.x = xpos;
+    mouse_position.y = ypos;
+
+    return true;
+}
+
+static b8 window_closed_event_callback(event_code_e code, event_data_t data)
 {
     running = false;
     return true;
 }
 
-void signal_handler(i32 sig)
+static b8 window_resized_event_callback(event_code_e code, event_data_t data)
+{
+    u32 width = data.u32[0];
+    u32 height = data.u32[1];
+
+    camera_resize(&ui_camera, width, height);
+    camera_resize(&game_camera, width, height);
+
+    if (is_camera_locked_on_player) {
+        camera_set_position(&game_camera, vec2_sub(self_player.base.position, vec2_create(width/2, height/2)));
+    }
+
+    return false;
+}
+
+static void signal_handler(i32 sig)
 {
     running = false;
 }
 
-void display_build_version(void)
+static void display_build_version(void)
 {
     renderer_draw_text(BUILD_VERSION(CLIENT_VERSION_MAJOR, CLIENT_VERSION_MINOR, CLIENT_VERSION_PATCH),
                        FA32,
@@ -475,6 +527,62 @@ void display_build_version(void)
                        1.0f,
                        COLOR_MILK,
                        0.6f);
+}
+
+#if defined(DEBUG)
+static void display_debug_info(void)
+{
+    u32 font_height = renderer_get_font_height(FA16);
+    vec2 position = vec2_create(3.0f, window_get_size().y - 50);
+
+    char buffer[256] = {0};
+    snprintf(buffer, sizeof(buffer), "cursor captured: %s", window_is_cursor_captured() ? "true" : "false");
+    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, 0.6f);
+    memset(buffer, 0, sizeof(buffer));
+
+    position.y -= font_height;
+
+    snprintf(buffer, sizeof(buffer), "camera locked: %s", is_camera_locked_on_player ? "true" : "false");
+    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, 0.6f);
+    memset(buffer, 0, sizeof(buffer));
+
+    position.y -= font_height;
+
+    snprintf(buffer, sizeof(buffer), "camera position: x=%.2f y=%.2f", game_camera.position.x, game_camera.position.y);
+    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, 0.6f);
+    memset(buffer, 0, sizeof(buffer));
+}
+#endif
+
+static void check_camera_movement(void)
+{
+    if (!window_is_cursor_captured() || is_camera_locked_on_player) {
+        return;
+    }
+
+    b8 camera_moved = false;
+    vec2 window_size = window_get_size();
+    vec2 offset = vec2_zero();
+
+    if (mouse_position.x <= CAMERA_MOVE_BORDER_OFFSET) {
+        offset.x -= CAMERA_MOVE_SPEED;
+        camera_moved = true;
+    } else if (mouse_position.x >= window_size.x - CAMERA_MOVE_BORDER_OFFSET - 1) {
+        offset.x += CAMERA_MOVE_SPEED;
+        camera_moved = true;
+    }
+
+    if (mouse_position.y <= CAMERA_MOVE_BORDER_OFFSET) {
+        offset.y += CAMERA_MOVE_SPEED;
+        camera_moved = true;
+    } else if (mouse_position.y >= window_size.y - CAMERA_MOVE_BORDER_OFFSET - 1) {
+        offset.y -= CAMERA_MOVE_SPEED;
+        camera_moved = true;
+    }
+
+    if (camera_moved) {
+        camera_move(&game_camera, offset);
+    }
 }
 
 int main(int argc, char *argv[])
@@ -558,6 +666,9 @@ int main(int argc, char *argv[])
     sa.sa_handler = &signal_handler;
     sigaction(SIGINT, &sa, NULL);
 
+    camera_create(&ui_camera, vec2_zero());
+    camera_create(&game_camera, vec2_zero());
+
     chat_init();
     player_load_animations();
 
@@ -572,8 +683,11 @@ int main(int argc, char *argv[])
     event_system_register(EVENT_CODE_KEY_PRESSED, key_pressed_event_callback);
 
     event_system_register(EVENT_CODE_MOUSE_BUTTON_PRESSED, chat_mouse_button_pressed_event_callback);
+    event_system_register(EVENT_CODE_MOUSE_BUTTON_PRESSED, mouse_button_pressed_event_callback);
+    event_system_register(EVENT_CODE_MOUSE_MOVED, mouse_moved_event_callback);
 
     event_system_register(EVENT_CODE_WINDOW_CLOSED, window_closed_event_callback);
+    event_system_register(EVENT_CODE_WINDOW_RESIZED, window_resized_event_callback);
 
     pthread_t network_thread;
     pthread_create(&network_thread, NULL, handle_networking, NULL);
@@ -590,6 +704,8 @@ int main(int argc, char *argv[])
         delta_time = now - last_time;
         last_time = now;
 
+        check_camera_movement();
+
         server_update_accumulator += delta_time;
         client_update_accumulator += delta_time;
 
@@ -599,6 +715,8 @@ int main(int argc, char *argv[])
         }
 
         renderer_clear_screen(vec4_create(0.3f, 0.5f, 0.9f, 1.0f));
+
+        renderer_begin_scene(&game_camera);
 
         // Render all other players
         for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
@@ -612,6 +730,8 @@ int main(int argc, char *argv[])
             player_self_render(&self_player, delta_time);
         }
 
+        renderer_begin_scene(&ui_camera);
+
         chat_render();
         display_build_version();
 
@@ -624,6 +744,10 @@ int main(int argc, char *argv[])
             win_pos.y - renderer_get_font_height(FA32) - corner_padding
         );
         renderer_draw_text(health_buffer, FA32, health_position, 1.0f, COLOR_MILK, 1.0f);
+
+#if defined(DEBUG)
+        display_debug_info();
+#endif
 
         window_poll_events();
         window_swap_buffers();
@@ -652,8 +776,11 @@ int main(int argc, char *argv[])
     event_system_unregister(EVENT_CODE_KEY_PRESSED, key_pressed_event_callback);
 
     event_system_unregister(EVENT_CODE_MOUSE_BUTTON_PRESSED, chat_mouse_button_pressed_event_callback);
+    event_system_unregister(EVENT_CODE_MOUSE_BUTTON_PRESSED, mouse_button_pressed_event_callback);
+    event_system_unregister(EVENT_CODE_MOUSE_MOVED, mouse_moved_event_callback);
 
     event_system_unregister(EVENT_CODE_WINDOW_CLOSED, window_closed_event_callback);
+    event_system_unregister(EVENT_CODE_WINDOW_RESIZED, window_resized_event_callback);
 
     chat_shutdown();
     renderer_shutdown();

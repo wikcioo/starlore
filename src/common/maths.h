@@ -122,6 +122,20 @@ INLINE vec2 vec2_sub(vec2 from, vec2 what)
     };
 }
 
+INLINE vec2 vec2_negate(vec2 vector) {
+    return (vec2) {
+        .x = -vector.x,
+        .y = -vector.y
+    };
+}
+
+INLINE vec2 vec2_divide(vec2 vector, f32 scalar) {
+    return (vec2) {
+        .x = vector.x / scalar,
+        .y = vector.y / scalar
+    };
+}
+
 INLINE vec3 vec3_create(f32 x, f32 y, f32 z)
 {
     return (vec3) {

@@ -10,6 +10,7 @@
 
 static GLFWwindow *main_window;
 static vec2 main_window_size;
+static b8 is_cursor_captured;
 
 static void glfw_error_callback(i32 code, const char *description)
 {
@@ -41,6 +42,11 @@ static void glfw_mouse_button_callback(GLFWwindow* window, int button, int actio
     if (action == INPUTACTION_Press) {
         event_system_fire(EVENT_CODE_MOUSE_BUTTON_PRESSED, (event_data_t){ .u8[0]=button });
     }
+}
+
+static void glfw_mouse_moved_callback(GLFWwindow *window, f64 xpos, f64 ypos)
+{
+    event_system_fire(EVENT_CODE_MOUSE_MOVED, (event_data_t){ .f32[0]=xpos, .f32[1]=ypos });
 }
 
 static void glfw_framebuffer_size_callback(GLFWwindow *window, i32 width, i32 height)
@@ -80,6 +86,7 @@ b8 window_create(u32 width, u32 height, const char *title)
     glfwSetKeyCallback            (main_window, glfw_key_callback);
     glfwSetCharCallback           (main_window, glfw_char_callback);
     glfwSetMouseButtonCallback    (main_window, glfw_mouse_button_callback);
+    glfwSetCursorPosCallback      (main_window, glfw_mouse_moved_callback);
     glfwSetFramebufferSizeCallback(main_window, glfw_framebuffer_size_callback);
     glfwSetWindowCloseCallback    (main_window, glfw_window_close_callback);
 
@@ -119,6 +126,21 @@ void window_poll_events(void)
 void window_swap_buffers(void)
 {
     glfwSwapBuffers(main_window);
+}
+
+b8 window_is_cursor_captured(void)
+{
+    return is_cursor_captured;
+}
+
+void window_set_cursor_state(b8 captured)
+{
+    is_cursor_captured = captured;
+    if (captured) {
+        glfwSetInputMode(main_window, GLFW_CURSOR, GLFW_CURSOR_CAPTURED);
+    } else {
+        glfwSetInputMode(main_window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+    }
 }
 
 vec2 window_get_size(void)

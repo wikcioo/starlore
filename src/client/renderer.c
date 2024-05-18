@@ -8,6 +8,7 @@
 #include "defines.h"
 #include "shader.h"
 #include "config.h"
+#include "window.h"
 #include "color_palette.h"
 #include "common/logger.h"
 #include "common/asserts.h"
@@ -50,8 +51,6 @@ static quad_data_t quad_data;
 
 static FT_Library ft;
 static FT_Face face;
-
-static mat4 ortho_projection;
 
 static b8 default_quad_vertices_in_buffer = true;
 static vertex_2d default_vertices[4] = {
@@ -187,9 +186,6 @@ static void create_shaders(void)
         LOG_ERROR("failed to create font shader");
     }
 
-    shader_bind(&font_shader);
-    shader_set_uniform_mat4(&font_shader, "u_projection", &ortho_projection);
-
     shader_create_info_t quad_shader_create_info = {
         "assets/shaders/quad.vert",
         "assets/shaders/quad.frag"
@@ -198,16 +194,10 @@ static void create_shaders(void)
     if (!shader_create(&quad_shader_create_info, &quad_shader)) {
         LOG_ERROR("failed to create quad shader");
     }
-
-    shader_bind(&quad_shader);
-    shader_set_uniform_mat4(&quad_shader, "u_projection", &ortho_projection);
 }
 
 b8 renderer_init(void)
 {
-    event_system_register(EVENT_CODE_WINDOW_RESIZED, renderer_window_resized_event_callback);
-    ortho_projection = mat4_orthographic(0.0f, DEFAULT_WINDOW_WIDTH, 0.0f, DEFAULT_WINDOW_HEIGHT, -1.0f, 1.0f);
-
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
@@ -248,6 +238,15 @@ u32 renderer_get_font_width(font_atlas_size_e fa)
 {
     // NOTE: Works only for monospaced fonts
     return font_atlases[fa].glyphs[32].advance.x;
+}
+
+void renderer_begin_scene(camera_t *camera)
+{
+    shader_bind(&font_shader);
+    shader_set_uniform_mat4(&font_shader, "u_projection", &camera->projection);
+
+    shader_bind(&quad_shader);
+    shader_set_uniform_mat4(&quad_shader, "u_projection", &camera->projection);
 }
 
 void renderer_draw_text(const char *text, font_atlas_size_e fa_size, vec2 position, f32 scale, vec3 color, f32 alpha)
@@ -392,18 +391,4 @@ void renderer_draw_sprite_uv_color(texture_t *texture, vec2 uv[4], vec2 size, ve
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_2d) * 4, vertices, GL_DYNAMIC_DRAW);
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, NULL);
     default_quad_vertices_in_buffer = false;
-}
-
-b8 renderer_window_resized_event_callback(event_code_e code, event_data_t data)
-{
-    u32 width = data.u32[0];
-    u32 height = data.u32[1];
-    ortho_projection = mat4_orthographic(0.0f, width, 0.0f, height, -1.0f, 1.0f);
-
-    shader_bind(&font_shader);
-    shader_set_uniform_mat4(&font_shader, "u_projection", &ortho_projection);
-    shader_bind(&quad_shader);
-    shader_set_uniform_mat4(&quad_shader, "u_projection", &ortho_projection);
-
-    return false;
 }

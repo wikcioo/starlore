@@ -22,6 +22,8 @@
 #define KEYFRAME_HEIGHT_PX 32
 
 extern i32 client_socket;
+extern camera_t game_camera;
+extern b8 is_camera_locked_on_player;
 
 static b8 player_keys_state[KEYCODE_Last];
 static player_self_t *player_self_ref;
@@ -245,6 +247,11 @@ void player_self_update(player_self_t *player, f64 delta_time)
 
     player->base.position = vec2_add(player->base.position, movement);
 
+    vec2 window_size = window_get_size();
+    if (is_camera_locked_on_player) {
+        camera_set_position(&game_camera, vec2_sub(player->base.position, vec2_divide(window_size, 2)));
+    }
+
     packet_player_keypress_t player_keypress_packet = {
         .id = player->base.id,
         .seq_nr = packet_get_next_sequence_number(),
@@ -267,6 +274,7 @@ void player_self_update(player_self_t *player, f64 delta_time)
 
 void player_self_handle_authoritative_update(player_self_t *player, packet_player_update_t *packet)
 {
+    vec2 window_size = window_get_size();
     for (;;) {
         b8 dequeue_status;
         packet_player_keypress_t keypress = {0};
@@ -294,6 +302,9 @@ void player_self_handle_authoritative_update(player_self_t *player, packet_playe
                 } else if (keypress.key == KEYCODE_D) {
                     player->base.position.x += PLAYER_VELOCITY * multiplier;
                 }
+            }
+            if (is_camera_locked_on_player) {
+                camera_set_position(&game_camera, vec2_sub(player->base.position, vec2_divide(window_size, 2)));
             }
             break;
         }
