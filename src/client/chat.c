@@ -7,13 +7,14 @@
 #include "window.h"
 #include "renderer.h"
 #include "color_palette.h"
+#include "common/packet.h"
 #include "common/input_codes.h"
 #include "common/strings.h"
 #include "common/asserts.h"
 #include "common/logger.h"
 #include "common/containers/darray.h"
 
-#define MAX_INPUT_BUFFER_LENGTH (MAX_MESSAGE_CONTENT_LENGTH - 5)
+#define MAX_INPUT_BUFFER_LENGTH (MESSAGE_MAX_CONTENT_LENGTH - 5)
 
 typedef enum {
     CURSOR_DIR_LEFT,
@@ -36,7 +37,7 @@ static u32 cursor_offset;
 static u32 input_count;
 static char input_buffer[MAX_INPUT_BUFFER_LENGTH];
 
-extern char username[MAX_PLAYER_NAME_LENGTH];
+extern char username[PLAYER_MAX_NAME_LENGTH];
 extern i32 client_socket;
 
 static font_atlas_size_e fa = FA16;
@@ -48,7 +49,7 @@ static f32 total_num_rows;
 
 typedef struct {
     vec3 color;
-    char data[MAX_PLAYER_NAME_LENGTH + MAX_MESSAGE_CONTENT_LENGTH];
+    char data[PLAYER_MAX_NAME_LENGTH + MESSAGE_MAX_CONTENT_LENGTH];
 } message_t;
 
 static message_t *messages;
@@ -167,7 +168,7 @@ b8 chat_key_pressed_event_callback(event_code_e code, event_data_t data)
 
                 packet_message_t message_packet = {0};
                 message_packet.type = MESSAGE_TYPE_PLAYER;
-                u32 username_size = strlen(username) > MAX_PLAYER_NAME_LENGTH ? MAX_PLAYER_NAME_LENGTH : strlen(username);
+                u32 username_size = strlen(username) > PLAYER_MAX_NAME_LENGTH ? PLAYER_MAX_NAME_LENGTH : strlen(username);
                 strncpy(message_packet.author, username, username_size);
                 u32 content_size = input_trimmed_length > MAX_INPUT_BUFFER_LENGTH ? MAX_INPUT_BUFFER_LENGTH : input_trimmed_length;
                 strncpy(message_packet.content, input_trimmed, content_size);

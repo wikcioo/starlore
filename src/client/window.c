@@ -73,6 +73,8 @@ b8 window_create(u32 width, u32 height, const char *title)
         return false;
     }
 
+    main_window_size = vec2_create(width, height);
+
     glfwMakeContextCurrent(main_window);
 
     glfwSetKeyCallback            (main_window, glfw_key_callback);

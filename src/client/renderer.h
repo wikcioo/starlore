@@ -25,5 +25,6 @@ void renderer_draw_text(const char *text, font_atlas_size_e fa_size, vec2 positi
 void renderer_draw_quad(vec2 position, vec2 size, f32 rotation_angle, vec3 color, f32 alpha);
 void renderer_draw_sprite(texture_t *texture, vec2 position, f32 scale, f32 rotation_angle);
 void renderer_draw_sprite_color(texture_t *texture, vec2 position, f32 scale, f32 rotation_angle, vec3 color, f32 alpha);
+void renderer_draw_sprite_uv_color(texture_t *texture, vec2 uv[4], vec2 size, vec2 position, f32 scale, f32 rotation_angle, vec3 color, f32 alpha);
 
 b8 renderer_window_resized_event_callback(event_code_e code, event_data_t data);

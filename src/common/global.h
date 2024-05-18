@@ -1,4 +1,20 @@
 #pragma once
 
+#include "defines.h"
+
 #define SERVER_TICK_RATE 64
+
+#define MAX_PLAYER_COUNT 5
+#define MAX_MESSAGE_HISTORY_LENGTH 8
+
+#define PLAYER_INVALID_ID 0
+#define PLAYER_MAX_NAME_LENGTH 32
 #define PLAYER_VELOCITY 5.0f
+#define PLAYER_DAMAGE_VALUE 10.0f
+#define PLAYER_START_HEALTH 200.0f
+#define PLAYER_ATTACK_COOLDOWN 0.1f
+#define PLAYER_RESPAWN_COOLDOWN 5.0f
+
+#define MESSAGE_MAX_CONTENT_LENGTH 256
+
+typedef u32 player_id;

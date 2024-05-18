@@ -8,6 +8,8 @@
 #include "common/asserts.h"
 #include "common/logger.h"
 
+static u64 packet_sequence_number = 0;
+
 b8 packet_send(i32 socket, u32 type, void *packet_data)
 {
     ASSERT(type > PACKET_TYPE_NONE && type < PACKET_TYPE_COUNT);
@@ -40,4 +42,9 @@ b8 packet_send(i32 socket, u32 type, void *packet_data)
     free(buffer);
 
     return bytes_sent_total == buffer_size;
+}
+
+u64 packet_get_next_sequence_number(void)
+{
+    return packet_sequence_number++;
 }

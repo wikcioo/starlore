@@ -2,6 +2,8 @@
 
 #include "defines.h"
 #include "common/maths.h"
+#include "common/global.h"
+#include "common/player_types.h"
 
 typedef enum {
     PACKET_TYPE_NONE,
@@ -14,6 +16,9 @@ typedef enum {
     PACKET_TYPE_PLAYER_ADD,
     PACKET_TYPE_PLAYER_REMOVE,
     PACKET_TYPE_PLAYER_UPDATE,
+    PACKET_TYPE_PLAYER_HEALTH,
+    PACKET_TYPE_PLAYER_DEATH,
+    PACKET_TYPE_PLAYER_RESPAWN,
     PACKET_TYPE_PLAYER_KEYPRESS,
     PACKET_TYPE_COUNT
 } packet_type_e;
@@ -24,15 +29,6 @@ typedef enum {
     MESSAGE_TYPE_PLAYER,
     MESSAGE_TYPE_COUNT
 } message_type_e;
-
-#define MAX_PLAYER_NAME_LENGTH 32
-#define MAX_MESSAGE_CONTENT_LENGTH 256
-#define MAX_PLAYER_COUNT 5
-#define MAX_MESSAGE_HISTORY_LENGTH 8
-
-#define PLAYER_INVALID_ID 0
-
-typedef u32 player_id;
 
 typedef struct {
     u32 type;
@@ -46,8 +42,8 @@ typedef struct {
 typedef struct {
     u32 type;
     i64 timestamp;
-    char author[MAX_PLAYER_NAME_LENGTH];
-    char content[MAX_MESSAGE_CONTENT_LENGTH];
+    char author[PLAYER_MAX_NAME_LENGTH];
+    char content[MESSAGE_MAX_CONTENT_LENGTH];
 } packet_message_t;
 
 typedef struct {
@@ -59,18 +55,24 @@ typedef struct {
     player_id id;
     vec2 position;
     vec3 color;
+    i32 health;
+    player_state_e state;
+    player_direction_e direction;
 } packet_player_init_t;
 
 typedef struct {
     player_id id;
-    char name[MAX_PLAYER_NAME_LENGTH];
+    char name[PLAYER_MAX_NAME_LENGTH];
 } packet_player_init_confirm_t;
 
 typedef struct {
     player_id id;
-    char name[MAX_PLAYER_NAME_LENGTH];
+    char name[PLAYER_MAX_NAME_LENGTH];
     vec2 position;
     vec3 color;
+    i32 health;
+    player_state_e state;
+    player_direction_e direction;
 } packet_player_add_t;
 
 typedef struct {
@@ -81,13 +83,33 @@ typedef struct {
     u32 seq_nr;
     player_id id;
     vec2 position;
+    u8 direction;
+    u8 state;
 } packet_player_update_t;
 
 typedef struct {
     player_id id;
+    u32 damage;
+} packet_player_health_t;
+
+typedef struct {
+    player_id id;
+} packet_player_death_t;
+
+typedef struct {
+    player_id id;
+    i32 health;
+    vec2 position;
+    player_state_e state;
+    player_direction_e direction;
+} packet_player_respawn_t;
+
+typedef struct {
+    player_id id;
     u32 seq_nr;
-    i32 key;
-    i32 action;
+    u32 key;
+    u32 mods;
+    u32 action;
 } packet_player_keypress_t;
 
 static const u32 PACKET_TYPE_SIZE[PACKET_TYPE_COUNT] = {
@@ -101,7 +123,11 @@ static const u32 PACKET_TYPE_SIZE[PACKET_TYPE_COUNT] = {
     [PACKET_TYPE_PLAYER_ADD]        = sizeof(packet_player_add_t),
     [PACKET_TYPE_PLAYER_REMOVE]     = sizeof(packet_player_remove_t),
     [PACKET_TYPE_PLAYER_UPDATE]     = sizeof(packet_player_update_t),
+    [PACKET_TYPE_PLAYER_HEALTH]     = sizeof(packet_player_health_t),
+    [PACKET_TYPE_PLAYER_DEATH]      = sizeof(packet_player_death_t),
+    [PACKET_TYPE_PLAYER_RESPAWN]    = sizeof(packet_player_respawn_t),
     [PACKET_TYPE_PLAYER_KEYPRESS]   = sizeof(packet_player_keypress_t)
 };
 
 b8 packet_send(i32 socket, u32 type, void *packet_data);
+u64 packet_get_next_sequence_number(void);

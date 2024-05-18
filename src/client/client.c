@@ -22,6 +22,7 @@
 #include "event.h"
 #include "chat.h"
 #include "window.h"
+#include "player.h"
 #include "color_palette.h"
 #include "common/asserts.h"
 #include "common/strings.h"
@@ -35,38 +36,26 @@
 #define POLLFD_COUNT 2
 #define INPUT_BUFFER_SIZE 4096
 #define OVERFLOW_BUFFER_SIZE 1024
-#define RING_BUFFER_CAPACITY 256
 #define POLL_INFINITE_TIMEOUT -1
 
 #define CLIENT_TICK_DURATION (1.0f / CLIENT_TICK_RATE)
-#define SERVER_TICK_DURATION (1.0f / SERVER_TICK_RATE)
 
-typedef struct {
-    player_id id;
-    char name[MAX_PLAYER_NAME_LENGTH];
-    vec2 position;
-    vec2 last_position; // Used for interpolation
-    b8 interp_complete;
-    vec3 color;
-} player_t;
+static u32 remote_player_count = 0;
+static player_remote_t remote_players[MAX_PLAYER_COUNT];
+static player_self_t self_player;
 
-static u32 other_player_count = 0;
-static player_t other_players[MAX_PLAYER_COUNT];
 static f32 server_update_accumulator = 0.0f;
-static player_t self_player;
-static b8 keys[KEYCODE_Last];
+
 static struct pollfd pfds[POLLFD_COUNT];
+
 static char input_buffer[INPUT_BUFFER_SIZE] = {0};
 static u32 input_count = 0;
+
 static b8 running = false;
-static void *ring_buffer;
-static u32 current_sequence_number = 1;
 
 // Data referenced from somewhere else
-char username[MAX_PLAYER_NAME_LENGTH];
+char username[PLAYER_MAX_NAME_LENGTH];
 i32 client_socket;
-
-texture_t player_texture;
 
 b8 handle_client_validation(i32 client)
 {
@@ -157,9 +146,9 @@ void handle_stdin_event(void)
 
             packet_message_t message_packet = {0};
             message_packet.type = MESSAGE_TYPE_PLAYER;
-            u32 username_size = strlen(username) > MAX_PLAYER_NAME_LENGTH ? MAX_PLAYER_NAME_LENGTH : strlen(username);
+            u32 username_size = strlen(username) > PLAYER_MAX_NAME_LENGTH ? PLAYER_MAX_NAME_LENGTH : strlen(username);
             strncpy(message_packet.author, username, username_size);
-            u32 content_size = input_count > MAX_MESSAGE_CONTENT_LENGTH ? MAX_MESSAGE_CONTENT_LENGTH : input_count;
+            u32 content_size = input_count > MESSAGE_MAX_CONTENT_LENGTH ? MESSAGE_MAX_CONTENT_LENGTH : input_count;
             strncpy(message_packet.content, input_trimmed, content_size);
 
             if (!packet_send(client_socket, PACKET_TYPE_MESSAGE, &message_packet)) {
@@ -267,16 +256,14 @@ void handle_socket_event(void)
             case PACKET_TYPE_PLAYER_INIT: {
                 received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_PLAYER_INIT];
                 packet_player_init_t *player_init = (packet_player_init_t *)(buffer + PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]);
-                self_player.id       = player_init->id;
-                self_player.position = player_init->position;
-                self_player.color    = player_init->color;
+                player_self_create(username, player_init, &self_player);
                 LOG_INFO("initialized self: id=%u position=(%f,%f) color=(%f,%f,%f)",
-                        self_player.id,
-                        self_player.position.x, self_player.position.y,
-                        self_player.color.r, self_player.color.g, self_player.color.b);
+                        self_player.base.id,
+                        self_player.base.position.x, self_player.base.position.y,
+                        self_player.base.color.r, self_player.base.color.g, self_player.base.color.b);
 
                 packet_player_init_confirm_t player_confirm_packet = {0};
-                player_confirm_packet.id = self_player.id;
+                player_confirm_packet.id = self_player.base.id;
                 memcpy(player_confirm_packet.name, username, strlen(username));
                 if (!packet_send(client_socket, PACKET_TYPE_PLAYER_INIT_CONF, &player_confirm_packet)) {
                     LOG_ERROR("failed to send player init confirm packet");
@@ -288,21 +275,16 @@ void handle_socket_event(void)
 
                 b8 found_free_slot = false;
                 for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
-                    if (other_players[i].id == PLAYER_INVALID_ID) { /* Free slot */
-                        LOG_INFO("adding new player id=%u", player_add->id);
-                        other_players[i].id              = player_add->id;
-                        other_players[i].position        = player_add->position;
-                        other_players[i].color           = player_add->color;
-                        other_players[i].last_position   = player_add->position;
-                        other_players[i].interp_complete = true;
-                        memcpy(other_players[i].name, player_add->name, strlen(player_add->name));
-                        other_player_count++;
+                    if (remote_players[i].base.id == PLAYER_INVALID_ID) { /* Free slot */
+                        LOG_INFO("adding new remote player id=%u", player_add->id);
+                        player_remote_create(player_add, &remote_players[i]);
+                        remote_player_count++;
                         found_free_slot = true;
                         break;
                     }
                 }
                 if (!found_free_slot) {
-                    LOG_ERROR("failed to add new player, no free slots - other_player_count=%u", other_player_count);
+                    LOG_ERROR("failed to add new remote player, no free slots - remote_player_count=%u", remote_player_count);
                 }
             } break;
             case PACKET_TYPE_PLAYER_REMOVE: {
@@ -310,8 +292,8 @@ void handle_socket_event(void)
                 packet_player_remove_t *player_remove = (packet_player_remove_t *)(buffer + PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]);
                 b8 found_player_to_remove = false;
                 for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
-                    if (other_players[i].id == player_remove->id) {
-                        other_players[i].id = PLAYER_INVALID_ID;
+                    if (remote_players[i].base.id == player_remove->id) {
+                        remote_players[i].base.id = PLAYER_INVALID_ID;
                         found_player_to_remove = true;
                         break;
                     }
@@ -326,46 +308,15 @@ void handle_socket_event(void)
                 received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_PLAYER_UPDATE];
                 packet_player_update_t *player_update = (packet_player_update_t *)(buffer + PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]);
 
-                if (player_update->id == self_player.id) {
-                    for (;;) {
-                        b8 dequeue_status;
-                        packet_player_keypress_t keypress = {0};
-
-                        ring_buffer_dequeue(ring_buffer, &keypress, &dequeue_status);
-                        if (!dequeue_status) {
-                            LOG_WARN("ran out of keypresses and did not find appropriate sequence number");
-                            break;
-                        }
-
-                        if (keypress.seq_nr == player_update->seq_nr) {
-                            // Got authoritative position update from the server, so update self_player position received from the server
-                            // and re-apply all keypresses that happened since then
-                            self_player.position = player_update->position;
-
-                            u32 nth_element = 0;
-                            while (ring_buffer_peek_from_end(ring_buffer, nth_element++, &keypress)) {
-                                if (keypress.key == KEYCODE_W) {
-                                    self_player.position.y += PLAYER_VELOCITY;
-                                } else if (keypress.key == KEYCODE_S) {
-                                    self_player.position.y -= PLAYER_VELOCITY;
-                                } else if (keypress.key == KEYCODE_A) {
-                                    self_player.position.x -= PLAYER_VELOCITY;
-                                } else if (keypress.key == KEYCODE_D) {
-                                    self_player.position.x += PLAYER_VELOCITY;
-                                }
-                            }
-                            break;
-                        }
-                    }
+                if (player_update->id == self_player.base.id) {
+                    player_self_handle_authoritative_update(&self_player, player_update);
                     break;
                 }
 
                 b8 found_player_to_update = false;
                 for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
-                    if (other_players[i].id == player_update->id) {
-                        other_players[i].last_position = other_players[i].position;
-                        other_players[i].position = player_update->position;
-                        other_players[i].interp_complete = false;
+                    if (remote_players[i].base.id == player_update->id) {
+                        player_remote_handle_authoritative_update(&remote_players[i], player_update);
                         found_player_to_update = true;
                         server_update_accumulator = 0.0f;
                         break;
@@ -373,6 +324,77 @@ void handle_socket_event(void)
                 }
                 if (!found_player_to_update) {
                     LOG_ERROR("failed to update player with id=%u", player_update->id);
+                }
+            } break;
+            case PACKET_TYPE_PLAYER_HEALTH: {
+                received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_PLAYER_HEALTH];
+                packet_player_health_t *player_health_packet = (packet_player_health_t *)(buffer + PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]);
+
+                if (player_health_packet->id == self_player.base.id) {
+                    player_take_damage(&self_player.base, player_health_packet->damage);
+                    break;
+                }
+
+                b8 found_player_to_update = false;
+                for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
+                    if (remote_players[i].base.id == player_health_packet->id) {
+                        player_take_damage(&remote_players[i].base, player_health_packet->damage);
+                        found_player_to_update = true;
+                        break;
+                    }
+                }
+                if (!found_player_to_update) {
+                    LOG_ERROR("failed to update health of player with id=%u", player_health_packet->id);
+                }
+            } break;
+            case PACKET_TYPE_PLAYER_DEATH: {
+                received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_PLAYER_DEATH];
+                packet_player_death_t *player_death_packet = (packet_player_death_t *)(buffer + PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]);
+
+                if (player_death_packet->id == self_player.base.id) {
+                    if (self_player.base.state != PLAYER_STATE_DEAD) {
+                        self_player.base.state = PLAYER_STATE_DEAD;
+                        self_player.base.animation.player.keyframe_index = 0;
+                        self_player.base.animation.player.accumulator = 0.0f;
+                    }
+                    break;
+                }
+
+                b8 found_player_to_update = false;
+                for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
+                    if (remote_players[i].base.id == player_death_packet->id) {
+                        if (remote_players[i].base.state != PLAYER_STATE_DEAD) {
+                            remote_players[i].base.state = PLAYER_STATE_DEAD;
+                            remote_players[i].base.animation.player.keyframe_index = 0;
+                            remote_players[i].base.animation.player.accumulator = 0.0f;
+                        }
+                        found_player_to_update = true;
+                        break;
+                    }
+                }
+                if (!found_player_to_update) {
+                    LOG_ERROR("failed to update death of player with id=%u", player_death_packet->id);
+                }
+            } break;
+            case PACKET_TYPE_PLAYER_RESPAWN: {
+                received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_PLAYER_RESPAWN];
+                packet_player_respawn_t *player_respawn_packet = (packet_player_respawn_t *)(buffer + PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]);
+
+                if (player_respawn_packet->id == self_player.base.id) {
+                    player_respawn(&self_player.base, player_respawn_packet);
+                    break;
+                }
+
+                b8 found_player_to_update = false;
+                for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
+                    if (remote_players[i].base.id == player_respawn_packet->id) {
+                        player_respawn(&remote_players[i].base, player_respawn_packet);
+                        found_player_to_update = true;
+                        break;
+                    }
+                }
+                if (!found_player_to_update) {
+                    LOG_ERROR("failed to update respawn of player with id=%u", player_respawn_packet->id);
                 }
             } break;
             default:
@@ -428,76 +450,16 @@ b8 key_pressed_event_callback(event_code_e code, event_data_t data)
     u16 key = data.u16[0];
     if (key == KEYCODE_P) {
         send_ping_packet();
-    } else {
-        keys[key] = true;
+        return true;
     }
 
-    return true;
-}
-
-b8 key_released_event_callback(event_code_e code, event_data_t data)
-{
-    u16 key = data.u16[0];
-    keys[key] = false;
-    return true;
+    return false;
 }
 
 b8 window_closed_event_callback(event_code_e code, event_data_t data)
 {
     running = false;
     return true;
-}
-
-void update_self_player(f64 delta_time)
-{
-    if (keys[KEYCODE_W] || keys[KEYCODE_S] || keys[KEYCODE_A] || keys[KEYCODE_D]) {
-        i32 key = 0;
-        if (keys[KEYCODE_W]) {
-            key = KEYCODE_W;
-        } else if (keys[KEYCODE_S]) {
-            key = KEYCODE_S;
-        } else if (keys[KEYCODE_A]) {
-            key = KEYCODE_A;
-        } else if (keys[KEYCODE_D]) {
-            key = KEYCODE_D;
-        }
-
-        { // client-side prediction
-            vec2 movement = vec2_zero();
-            if (key == KEYCODE_W) {
-                movement.y += PLAYER_VELOCITY;
-            }
-            if (key == KEYCODE_S) {
-                movement.y -= PLAYER_VELOCITY;
-            }
-            if (key == KEYCODE_A) {
-                movement.x -= PLAYER_VELOCITY;
-            }
-            if (key == KEYCODE_D) {
-                movement.x += PLAYER_VELOCITY;
-            }
-
-            self_player.position = vec2_add(self_player.position, movement);
-        }
-
-        packet_player_keypress_t player_keypress_packet = {
-            .id = self_player.id,
-            .seq_nr = current_sequence_number++,
-            .key = key,
-            .action = INPUTACTION_Press
-        };
-
-        b8 enqueue_status;
-        ring_buffer_enqueue(ring_buffer, player_keypress_packet, &enqueue_status);
-        if (!enqueue_status) {
-            LOG_ERROR("failed to enqueue player keypress packet");
-            return;
-        }
-
-        if (!packet_send(client_socket, PACKET_TYPE_PLAYER_KEYPRESS, &player_keypress_packet)) {
-            LOG_ERROR("failed to send player keypress packet");
-        }
-    }
 }
 
 void signal_handler(i32 sig)
@@ -558,7 +520,8 @@ int main(int argc, char *argv[])
         }
 
         if (connect(client_socket, rp->ai_addr, rp->ai_addrlen) == -1) {
-            LOG_ERROR("connect error: %s", strerror(errno)); /* TODO: Provide more information about failed parameters */
+            // TODO: Provide more information about failed parameters
+            LOG_ERROR("connect error: %s", strerror(errno));
             continue;
         }
 
@@ -595,18 +558,18 @@ int main(int argc, char *argv[])
     sa.sa_handler = &signal_handler;
     sigaction(SIGINT, &sa, NULL);
 
-    ring_buffer = ring_buffer_reserve(RING_BUFFER_CAPACITY, sizeof(packet_player_keypress_t));
-
     chat_init();
+    player_load_animations();
 
-    texture_create_from_path("assets/textures/old_man.png", &player_texture);
-
+    // NOTE: order of registration is important
     event_system_register(EVENT_CODE_CHAR_PRESSED, chat_char_pressed_event_callback);
     event_system_register(EVENT_CODE_KEY_PRESSED, chat_key_pressed_event_callback);
     event_system_register(EVENT_CODE_KEY_REPEATED, chat_key_repeated_event_callback);
 
+    event_system_register(EVENT_CODE_KEY_PRESSED, player_key_pressed_event_callback);
+    event_system_register(EVENT_CODE_KEY_RELEASED, player_key_released_event_callback);
+
     event_system_register(EVENT_CODE_KEY_PRESSED, key_pressed_event_callback);
-    event_system_register(EVENT_CODE_KEY_RELEASED, key_released_event_callback);
 
     event_system_register(EVENT_CODE_MOUSE_BUTTON_PRESSED, chat_mouse_button_pressed_event_callback);
 
@@ -631,56 +594,36 @@ int main(int argc, char *argv[])
         client_update_accumulator += delta_time;
 
         if (client_update_accumulator >= CLIENT_TICK_DURATION) {
-            update_self_player(delta_time);
+            player_self_update(&self_player, delta_time);
             client_update_accumulator = 0.0f;
         }
 
         renderer_clear_screen(vec4_create(0.3f, 0.5f, 0.9f, 1.0f));
 
-        if (self_player.id != PLAYER_INVALID_ID) {
-            vec2 username_position = vec2_create(
-                self_player.position.x - (renderer_get_font_width(FA16) * strlen(username))/2,
-                self_player.position.y + player_texture.height/2
-            );
-            renderer_draw_text(username, FA16, username_position, 1.0f, COLOR_MILK, 1.0f);
-            renderer_draw_sprite(&player_texture, self_player.position, 1.0f, 0.0f);
-        }
-
-        /* Draw all other players */
-        f32 server_update_accumulator_copy = server_update_accumulator;
+        // Render all other players
         for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
-            if (other_players[i].id != PLAYER_INVALID_ID) {
-                vec2 position;
-                if (!other_players[i].interp_complete) {
-                    // Interpolate player's position based on the current and last position and time since last server update
-                    f32 t = server_update_accumulator_copy / SERVER_TICK_DURATION;
-                    if (t > 1.0f) {
-                        t = 1.0f;
-                        other_players[i].interp_complete = true;
-                    }
-
-                    vec2 player_position = {
-                        .x = math_lerpf(other_players[i].last_position.x, other_players[i].position.x, t),
-                        .y = math_lerpf(other_players[i].last_position.y, other_players[i].position.y, t)
-                    };
-
-                    position = player_position;
-                } else {
-                    position = other_players[i].position;
-                }
-
-                vec2 username_position = vec2_create(
-                    position.x - (renderer_get_font_width(FA16) * strlen(other_players[i].name))/2,
-                    position.y + player_texture.height/2
-                );
-                renderer_draw_text(other_players[i].name, FA16, username_position, 1.0f, COLOR_MILK, 1.0f);
-                renderer_draw_sprite(&player_texture, position, 1.0f, 0.0f);
+            if (remote_players[i].base.id != PLAYER_INVALID_ID) {
+                player_remote_render(&remote_players[i], delta_time, server_update_accumulator);
             }
         }
 
-        display_build_version();
+        // Render ourselves
+        if (self_player.base.id != PLAYER_INVALID_ID) {
+            player_self_render(&self_player, delta_time);
+        }
 
         chat_render();
+        display_build_version();
+
+        char health_buffer[16];
+        snprintf(health_buffer, sizeof(health_buffer), "Health: %d", self_player.base.health);
+        vec2 win_pos = window_get_size();
+        f32 corner_padding = 10.0f;
+        vec2 health_position = vec2_create(
+            win_pos.x - (renderer_get_font_width(FA32) * strlen(health_buffer)) - corner_padding,
+            win_pos.y - renderer_get_font_height(FA32) - corner_padding
+        );
+        renderer_draw_text(health_buffer, FA32, health_position, 1.0f, COLOR_MILK, 1.0f);
 
         window_poll_events();
         window_swap_buffers();
@@ -688,24 +631,25 @@ int main(int argc, char *argv[])
 
     LOG_INFO("client shutting down");
 
-    /* Tell server to remove ourselves from the player list */
+    // Tell server to remove ourselves from the player list
     packet_player_remove_t player_remove_packet = {
-        .id = self_player.id
+        .id = self_player.base.id
     };
     if (!packet_send(client_socket, PACKET_TYPE_PLAYER_REMOVE, &player_remove_packet)) {
         LOG_ERROR("failed to send player remove packet");
     }
 
     LOG_INFO("removed self from players");
-
-    texture_destroy(&player_texture);
+    player_self_destroy(&self_player);
 
     event_system_unregister(EVENT_CODE_CHAR_PRESSED, chat_char_pressed_event_callback);
     event_system_unregister(EVENT_CODE_KEY_PRESSED, chat_key_pressed_event_callback);
     event_system_unregister(EVENT_CODE_KEY_REPEATED, chat_key_repeated_event_callback);
 
+    event_system_unregister(EVENT_CODE_KEY_PRESSED, player_key_pressed_event_callback);
+    event_system_unregister(EVENT_CODE_KEY_RELEASED, player_key_released_event_callback);
+
     event_system_unregister(EVENT_CODE_KEY_PRESSED, key_pressed_event_callback);
-    event_system_unregister(EVENT_CODE_KEY_RELEASED, key_released_event_callback);
 
     event_system_unregister(EVENT_CODE_MOUSE_BUTTON_PRESSED, chat_mouse_button_pressed_event_callback);
 
@@ -720,9 +664,6 @@ int main(int argc, char *argv[])
 
     pthread_kill(network_thread, SIGINT);
     pthread_join(network_thread, NULL);
-
-    ring_buffer_destroy(ring_buffer);
-    LOG_TRACE("destroyed ring buffer");
 
     return EXIT_SUCCESS;
 }

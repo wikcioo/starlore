@@ -14,6 +14,7 @@
 #include <pthread.h>
 
 #include "defines.h"
+#include "common/player_types.h"
 #include "common/global.h"
 #include "common/packet.h"
 #include "common/logger.h"
@@ -34,6 +35,8 @@
 
 #define MAX_MESSAGE_LENGTH 1024
 
+#define PLAYER_SPAWN_POSITION vec2_create(1280/2, 720/2)
+
 typedef struct {
     struct pollfd *fds;
     u32 count;
@@ -44,16 +47,20 @@ typedef struct {
     i32 socket;
     player_id id;
     u32 seq_nr;
-    char name[MAX_PLAYER_NAME_LENGTH];
+    char name[PLAYER_MAX_NAME_LENGTH];
     vec2 position;
     vec3 color;
+    i32 health;
+    player_direction_e direction;
+    player_state_e state;
+    f32 respawn_cooldown;
 } player_t;
 
 typedef struct {
     u32 type;
     i64 timestamp;
-    char author[MAX_PLAYER_NAME_LENGTH];
-    char content[MAX_MESSAGE_CONTENT_LENGTH];
+    char author[PLAYER_MAX_NAME_LENGTH];
+    char content[MESSAGE_MAX_CONTENT_LENGTH];
 } message_t;
 
 static b8 running;
@@ -183,16 +190,20 @@ void handle_new_player_connection(i32 client_socket)
         if (players[new_player_idx].id == PLAYER_INVALID_ID) { /* Free slot */
             players[new_player_idx].socket   = client_socket;
             players[new_player_idx].id       = current_player_id;
-            players[new_player_idx].position = vec2_create(0.0f, 0.0f);
+            players[new_player_idx].position = PLAYER_SPAWN_POSITION;
             players[new_player_idx].color    = vec3_create(red, green, blue);
+            players[new_player_idx].health   = PLAYER_START_HEALTH;
             break;
         }
     }
 
     packet_player_init_t player_init_packet = {
-        .id       = current_player_id,
-        .position = vec2_create(0.0f, 0.0f),
-        .color    = vec3_create(red, green, blue)
+        .id        = current_player_id,
+        .position  = PLAYER_SPAWN_POSITION,
+        .color     = vec3_create(red, green, blue),
+        .health    = PLAYER_START_HEALTH,
+        .state     = PLAYER_STATE_IDLE,
+        .direction = PLAYER_DIRECTION_DOWN
     };
     if (!packet_send(client_socket, PACKET_TYPE_PLAYER_INIT, &player_init_packet)) {
         LOG_ERROR("failed to send player init packet");
@@ -226,9 +237,12 @@ void handle_new_player_connection(i32 client_socket)
     for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
         if (players[i].id != PLAYER_INVALID_ID && players[i].id != player_init_packet.id) {
             packet_player_add_t player_add_packet = {
-                .id       = players[i].id,
-                .position = players[i].position,
-                .color    = players[i].color
+                .id        = players[i].id,
+                .position  = players[i].position,
+                .color     = players[i].color,
+                .health    = players[i].health,
+                .state     = players[i].state,
+                .direction = players[i].direction
             };
             memcpy(player_add_packet.name, players[i].name, strlen(players[i].name));
 
@@ -277,9 +291,12 @@ void handle_new_player_connection(i32 client_socket)
         if (players[i].id != PLAYER_INVALID_ID) {
             if (players[i].id != player_init_packet.id) {
                 packet_player_add_t player_add_packet = {
-                    .id       = player_init_packet.id,
-                    .position = player_init_packet.position,
-                    .color    = player_init_packet.color
+                    .id        = player_init_packet.id,
+                    .position  = player_init_packet.position,
+                    .color     = player_init_packet.color,
+                    .health    = player_init_packet.health,
+                    .state     = player_init_packet.state,
+                    .direction = player_init_packet.direction
                 };
                 memcpy(player_add_packet.name, players[new_player_idx].name, strlen(players[new_player_idx].name));
 
@@ -594,12 +611,100 @@ void signal_handler(i32 sig)
     running = false;
 }
 
-void process_pending_input(void)
+static b8 rect_collide(vec2 center1, vec2 size1, vec2 center2, vec2 size2)
+{
+    f32 left1 = center1.x - size1.x/2;
+    f32 right1 = center1.x + size1.x/2;
+    f32 top1 = center1.y - size1.y/2;
+    f32 bottom1 = center1.y + size1.y/2;
+
+    f32 left2 = center2.x - size2.x/2;
+    f32 right2 = center2.x + size2.x/2;
+    f32 top2 = center2.y - size2.y/2;
+    f32 bottom2 = center2.y + size2.y/2;
+
+    return left1 <= right2 && right1 >= left2 && top1 <= bottom2 && bottom1 >= top2;
+}
+
+static b8 is_player_key(u32 key)
+{
+    return key == KEYCODE_W || key == KEYCODE_S || key == KEYCODE_A || key == KEYCODE_D || key == KEYCODE_Space;
+}
+
+static void process_player_input(u32 key, u32 mods, player_t *player, u32 damaged_players[MAX_PLAYER_COUNT])
+{
+    if (key == KEYCODE_W) {
+        player->position.y += PLAYER_VELOCITY;
+        player->direction = PLAYER_DIRECTION_UP;
+        if (mods & KEYMOD_SHIFT) {
+            player->position.y += PLAYER_VELOCITY;
+            player->state = PLAYER_STATE_ROLL;
+        } else {
+            player->state = PLAYER_STATE_WALK;
+        }
+    } else if (key == KEYCODE_S) {
+        player->position.y -= PLAYER_VELOCITY;
+        player->direction = PLAYER_DIRECTION_DOWN;
+        player->state = PLAYER_STATE_WALK;
+        if (mods & KEYMOD_SHIFT) {
+            player->position.y -= PLAYER_VELOCITY;
+            player->state = PLAYER_STATE_ROLL;
+        }
+    } else if (key == KEYCODE_A) {
+        player->position.x -= PLAYER_VELOCITY;
+        player->direction = PLAYER_DIRECTION_LEFT;
+        player->state = PLAYER_STATE_WALK;
+        if (mods & KEYMOD_SHIFT) {
+            player->position.x -= PLAYER_VELOCITY;
+            player->state = PLAYER_STATE_ROLL;
+        }
+    } else if (key == KEYCODE_D) {
+        player->position.x += PLAYER_VELOCITY;
+        player->direction = PLAYER_DIRECTION_RIGHT;
+        player->state = PLAYER_STATE_WALK;
+        if (mods & KEYMOD_SHIFT) {
+            player->position.x += PLAYER_VELOCITY;
+            player->state = PLAYER_STATE_ROLL;
+        }
+    } else if (key == KEYCODE_Space) {
+        player->state = PLAYER_STATE_ATTACK;
+
+        static const f32 size = 32.0f;
+
+        vec2 attack_center = player->position;
+        vec2 attack_size = vec2_create(size, size);
+        if (player->direction == PLAYER_DIRECTION_UP) {
+            attack_center.y += size/2;
+            attack_size.y /= 3.0f;
+        } else if (player->direction == PLAYER_DIRECTION_DOWN) {
+            attack_center.y -= size/2;
+            attack_size.y /= 3.0f;
+        } else if (player->direction == PLAYER_DIRECTION_LEFT) {
+            attack_center.x -= size/2;
+            attack_size.x /= 3.0f;
+        } else if (player->direction == PLAYER_DIRECTION_RIGHT) {
+            attack_center.x += size/2;
+            attack_size.x /= 3.0f;
+        }
+
+        for (i32 j = 0; j < MAX_PLAYER_COUNT; j++) {
+            if (players[j].id != PLAYER_INVALID_ID && players[j].id != player->id) {
+                player_t *other_player = &players[j];
+                if (rect_collide(attack_center, attack_size, other_player->position, vec2_create(size, size))) {
+                    damaged_players[j] += PLAYER_DAMAGE_VALUE;
+                }
+            }
+        }
+    }
+}
+
+void process_pending_input(f64 delta_time)
 {
     b8 dequeue_status;
     u32 processed_input_count = 0;
     packet_player_keypress_t keypress;
     u32 modified_players[MAX_PLAYER_COUNT] = {0};
+    u32 damaged_players[MAX_PLAYER_COUNT] = {0};
 
     for (;;) {
         ring_buffer_dequeue(input_ring_buffer, &keypress, &dequeue_status);
@@ -607,7 +712,7 @@ void process_pending_input(void)
             break; // Finished processing all input from the queue
         }
 
-        if (keypress.key == KEYCODE_W || keypress.key == KEYCODE_S || keypress.key == KEYCODE_A || keypress.key == KEYCODE_D) {
+        if (is_player_key(keypress.key)) {
             i32 sender_idx = -1;
             for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
                 if (players[i].id == keypress.id) {
@@ -617,18 +722,10 @@ void process_pending_input(void)
             }
 
             ASSERT(sender_idx != -1);
-
-            if (keypress.key == KEYCODE_W) {
-                players[sender_idx].position.y += PLAYER_VELOCITY;
-            } else if (keypress.key == KEYCODE_S) {
-                players[sender_idx].position.y -= PLAYER_VELOCITY;
-            } else if (keypress.key == KEYCODE_A) {
-                players[sender_idx].position.x -= PLAYER_VELOCITY;
-            } else if (keypress.key == KEYCODE_D) {
-                players[sender_idx].position.x += PLAYER_VELOCITY;
-            }
+            process_player_input(keypress.key, keypress.mods, &players[sender_idx], damaged_players);
 
             players[sender_idx].seq_nr = keypress.seq_nr;
+
             if (modified_players[sender_idx] == 0) {
                 modified_players[sender_idx] = 1;
             }
@@ -641,21 +738,105 @@ void process_pending_input(void)
     }
 
     for (u64 i = 0; i < MAX_PLAYER_COUNT; i++) {
-        if (modified_players[i] == 0) {
-            continue;
+        // Check if new input has been processed for a player
+        if (modified_players[i] > 0) {
+            // Send updated players' state to all other players including the sender
+            packet_player_update_t player_update_packet = {
+                .seq_nr = players[i].seq_nr,
+                .id = players[i].id,
+                .position = players[i].position,
+                .direction = players[i].direction,
+                .state = players[i].state
+            };
+
+            for (i32 j = 0; j < MAX_PLAYER_COUNT; j++) {
+                if (players[j].id != PLAYER_INVALID_ID) {
+                    if (!packet_send(players[j].socket, PACKET_TYPE_PLAYER_UPDATE, &player_update_packet)) {
+                        LOG_ERROR("failed to send player update packet");
+                    }
+                }
+            }
         }
 
-        // Send updated players' state to all other players including the sender
-        packet_player_update_t player_update_packet = {
-            .seq_nr = players[i].seq_nr,
-            .id = players[i].id,
-            .position = players[i].position
-        };
+        // Check if any damage was dealt to a player
+        if (damaged_players[i] > 0 && players[i].health > 0) {
+            players[i].health -= damaged_players[i];
+            packet_player_death_t player_death_packet = {0};
+            packet_message_t message_death_packet = {0};
 
-        for (i32 j = 0; j < MAX_PLAYER_COUNT; j++) {
-            if (players[j].id != PLAYER_INVALID_ID) {
-                if (!packet_send(players[j].socket, PACKET_TYPE_PLAYER_UPDATE, &player_update_packet)) {
-                    LOG_ERROR("failed to send player update packet");
+            b8 player_died = players[i].health <= 0;
+
+            if (player_died) {
+                players[i].state = PLAYER_STATE_DEAD;
+                players[i].respawn_cooldown = PLAYER_RESPAWN_COOLDOWN;
+                player_death_packet.id = players[i].id;
+
+                message_death_packet.type = MESSAGE_TYPE_SYSTEM;
+                snprintf(message_death_packet.content,
+                         sizeof(message_death_packet.content),
+                         "player <%s> died! respawning in %.2f seconds...",
+                         players[i].name, PLAYER_RESPAWN_COOLDOWN);
+
+                message_t msg = {0};
+                msg.type = MESSAGE_TYPE_SYSTEM;
+                memcpy(msg.content, message_death_packet.content, strlen(message_death_packet.content));
+                darray_push(messages, msg);
+            }
+
+            // Send health updates to all players
+            packet_player_health_t player_health_packet = {
+                .id = players[i].id,
+                .damage = damaged_players[i]
+            };
+
+            for (i32 j = 0; j < MAX_PLAYER_COUNT; j++) {
+                if (players[j].id != PLAYER_INVALID_ID) {
+                    if (!packet_send(players[j].socket, PACKET_TYPE_PLAYER_HEALTH, &player_health_packet)) {
+                        LOG_ERROR("failed to send player health packet");
+                    }
+
+                    if (player_died) {
+                        if (!packet_send(players[j].socket, PACKET_TYPE_PLAYER_DEATH, &player_death_packet)) {
+                            LOG_ERROR("failed to send player death packet");
+                        }
+                        if (!packet_send(players[j].socket, PACKET_TYPE_MESSAGE, &message_death_packet)) {
+                            LOG_ERROR("failed to send message death packet");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Check if any players are dead and should be respawned
+    for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
+        if (players[i].id != PLAYER_INVALID_ID) {
+            if (players[i].state == PLAYER_STATE_DEAD) {
+                if (players[i].respawn_cooldown <= 0.0f) {
+                    // Found player who should be respawned
+                    // Update player state and send respawn packet to all players
+                    players[i].state = PLAYER_STATE_IDLE;
+                    players[i].health = PLAYER_START_HEALTH;
+                    players[i].position = PLAYER_SPAWN_POSITION;
+                    players[i].direction = PLAYER_DIRECTION_DOWN;
+
+                    packet_player_respawn_t player_respawn_packet = {
+                        .id        = players[i].id,
+                        .health    = players[i].health,
+                        .state     = players[i].state,
+                        .position  = players[i].position,
+                        .direction = players[i].direction
+                    };
+
+                    for (i32 j = 0; j < MAX_PLAYER_COUNT; j++) {
+                        if (players[j].id != PLAYER_INVALID_ID) {
+                            if (!packet_send(players[j].socket, PACKET_TYPE_PLAYER_RESPAWN, &player_respawn_packet)) {
+                                LOG_ERROR("failed to send player health packet");
+                            }
+                        }
+                    }
+                } else {
+                    players[i].respawn_cooldown -= delta_time;
                 }
             }
         }
@@ -665,8 +846,9 @@ void process_pending_input(void)
 void *process_input_queue(void *args)
 {
     static const u32 us_to_sleep = 1.0f / SERVER_TICK_RATE * 1000 * 1000;
+    static const f64 delta_time = 1.0 / SERVER_TICK_RATE;
     while (running) {
-        process_pending_input();
+        process_pending_input(delta_time);
         usleep(us_to_sleep);
     }
 

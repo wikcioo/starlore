@@ -53,6 +53,14 @@ static FT_Face face;
 
 static mat4 ortho_projection;
 
+static b8 default_quad_vertices_in_buffer = true;
+static vertex_2d default_vertices[4] = {
+    { { .x=-0.5f, .y=-0.5f }, { .u=0.0f, .v=0.0f } },
+    { { .x=-0.5f, .y= 0.5f }, { .u=0.0f, .v=1.0f } },
+    { { .x= 0.5f, .y= 0.5f }, { .u=1.0f, .v=1.0f } },
+    { { .x= 0.5f, .y=-0.5f }, { .u=1.0f, .v=0.0f } }
+};
+
 static void create_font_atlas(FT_Face ft_face, u32 height, font_atlas_t *out_atlas)
 {
     ASSERT(out_atlas);
@@ -136,13 +144,6 @@ static void create_font_data(void)
 
 static void create_quad_data(void)
 {
-    f32 vertices[] = {
-        -0.5f, -0.5f, 0.0f, 0.0f,
-        -0.5f,  0.5f, 0.0f, 1.0f,
-         0.5f,  0.5f, 1.0f, 1.0f,
-         0.5f, -0.5f, 1.0f, 0.0f
-    };
-
     u32 indices[] = {
         0, 1, 2,
         2, 3, 0
@@ -153,7 +154,7 @@ static void create_quad_data(void)
 
     glGenBuffers(1, &quad_data.vbo);
     glBindBuffer(GL_ARRAY_BUFFER, quad_data.vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), (void *)vertices, GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(default_vertices), (void *)default_vertices, GL_DYNAMIC_DRAW);
 
     glGenBuffers(1, &quad_data.ibo);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, quad_data.ibo);
@@ -327,6 +328,11 @@ void renderer_draw_quad(vec2 position, vec2 size, f32 rotation_angle, vec3 color
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, white_texture.id);
     glBindVertexArray(quad_data.vao);
+    if (!default_quad_vertices_in_buffer) {
+        glBindBuffer(GL_ARRAY_BUFFER, quad_data.vbo);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_2d) * 4, default_vertices, GL_DYNAMIC_DRAW);
+        default_quad_vertices_in_buffer = true;
+    }
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, NULL);
 }
 
@@ -351,7 +357,41 @@ void renderer_draw_sprite_color(texture_t *texture, vec2 position, f32 scale, f3
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, texture->id);
     glBindVertexArray(quad_data.vao);
+    if (!default_quad_vertices_in_buffer) {
+        glBindBuffer(GL_ARRAY_BUFFER, quad_data.vbo);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_2d) * 4, default_vertices, GL_DYNAMIC_DRAW);
+        default_quad_vertices_in_buffer = true;
+    }
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, NULL);
+}
+
+void renderer_draw_sprite_uv_color(texture_t *texture, vec2 uv[4], vec2 size, vec2 position, f32 scale, f32 rotation_angle, vec3 color, f32 alpha)
+{
+    shader_bind(&quad_shader);
+    shader_set_uniform_int(&quad_shader, "u_texture", 0);
+    vec4 sprite_color = vec4_create_from_vec3(color, alpha);
+    shader_set_uniform_vec4(&quad_shader, "u_color", &sprite_color);
+
+    mat4 translation_matrix = mat4_translate(position);
+    mat4 rotation_matrix = mat4_rotate(rotation_angle);
+    mat4 scale_matrix = mat4_scale(vec2_create(size.x * scale, size.y * scale));
+    mat4 model_matrix = mat4_multiply(translation_matrix, mat4_multiply(rotation_matrix, scale_matrix));
+    shader_set_uniform_mat4(&quad_shader, "u_model", &model_matrix);
+
+    vertex_2d vertices[4] = {0};
+    memcpy(vertices, default_vertices, sizeof(vertex_2d) * 4);
+    memcpy(&vertices[0].tex_coord, &uv[0], sizeof(vec2));
+    memcpy(&vertices[1].tex_coord, &uv[1], sizeof(vec2));
+    memcpy(&vertices[2].tex_coord, &uv[2], sizeof(vec2));
+    memcpy(&vertices[3].tex_coord, &uv[3], sizeof(vec2));
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, texture->id);
+    glBindVertexArray(quad_data.vao);
+    glBindBuffer(GL_ARRAY_BUFFER, quad_data.vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_2d) * 4, vertices, GL_DYNAMIC_DRAW);
+    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, NULL);
+    default_quad_vertices_in_buffer = false;
 }
 
 b8 renderer_window_resized_event_callback(event_code_e code, event_data_t data)

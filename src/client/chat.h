@@ -2,11 +2,11 @@
 
 #include "defines.h"
 #include "event.h"
-#include "common/packet.h"
+#include "common/global.h"
 
 typedef struct {
-    char name[MAX_PLAYER_NAME_LENGTH];
-    char content[MAX_MESSAGE_CONTENT_LENGTH];
+    char name[PLAYER_MAX_NAME_LENGTH];
+    char content[MESSAGE_MAX_CONTENT_LENGTH];
 } chat_player_message_t;
 
 void chat_init(void);
