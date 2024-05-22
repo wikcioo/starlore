@@ -1,8 +1,9 @@
 #include "maths.h"
 
 #include <math.h>
-#include <time.h>
 #include <stdlib.h>
+
+#include "common/clock.h"
 
 static b8 rand_seeded = false;
 
@@ -19,9 +20,7 @@ f32 math_cosf(f32 value)
 i32 math_random(void)
 {
     if (!rand_seeded) {
-        struct timespec ts;
-        clock_gettime(CLOCK_MONOTONIC, &ts);
-        srand((u32)ts.tv_nsec);
+        srand((u32)clock_get_absolute_time_ns());
         rand_seeded = true;
     }
 

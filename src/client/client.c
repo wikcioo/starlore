@@ -25,6 +25,8 @@
 #include "player.h"
 #include "camera.h"
 #include "color_palette.h"
+#include "common/net.h"
+#include "common/clock.h"
 #include "common/asserts.h"
 #include "common/strings.h"
 #include "common/global.h"
@@ -68,7 +70,7 @@ static b8 handle_client_validation(i32 client)
     u64 puzzle_buffer;
     i64 bytes_read, bytes_sent;
 
-    bytes_read = recv(client, (void *)&puzzle_buffer, sizeof(puzzle_buffer), 0); /* TODO: Handle unresponsive server */
+    bytes_read = net_recv(client, (void *)&puzzle_buffer, sizeof(puzzle_buffer), 0); /* TODO: Handle unresponsive server */
     if (bytes_read <= 0) {
         if (bytes_read == -1) {
             LOG_ERROR("validation: recv error: %s", strerror(errno));
@@ -80,7 +82,7 @@ static b8 handle_client_validation(i32 client)
 
     if (bytes_read == sizeof(puzzle_buffer)) {
         u64 answer = puzzle_buffer ^ 0xDEADBEEFCAFEBABE; /* TODO: Come up with a better validation function */
-        bytes_sent = send(client, (void *)&answer, sizeof(answer), 0);
+        bytes_sent = net_send(client, (void *)&answer, sizeof(answer), 0);
         if (bytes_sent == -1) {
             LOG_ERROR("validation: send error: %s", strerror(errno));
             return false;
@@ -90,7 +92,7 @@ static b8 handle_client_validation(i32 client)
         }
 
         b8 status_buffer;
-        bytes_read = recv(client, (void *)&status_buffer, sizeof(status_buffer), 0);
+        bytes_read = net_recv(client, (void *)&status_buffer, sizeof(status_buffer), 0);
         if (bytes_read <= 0) {
             if (bytes_read == -1) {
                 LOG_ERROR("validation status: recv error: %s", strerror(errno));
@@ -109,9 +111,7 @@ static b8 handle_client_validation(i32 client)
 
 static void send_ping_packet(void)
 {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    u64 time_now = (u64)(ts.tv_sec * 1000000000 + ts.tv_nsec);
+    u64 time_now = clock_get_absolute_time_ns();
 
     packet_ping_t ping_packet = {
         .time = time_now
@@ -171,7 +171,7 @@ static void handle_socket_event(void)
 {
     u8 recv_buffer[INPUT_BUFFER_SIZE + OVERFLOW_BUFFER_SIZE] = {0};
 
-    i64 bytes_read = recv(client_socket, recv_buffer, INPUT_BUFFER_SIZE, 0);
+    i64 bytes_read = net_recv(client_socket, recv_buffer, INPUT_BUFFER_SIZE, 0);
     if (bytes_read <= 0) {
         if (bytes_read == -1) {
             LOG_ERROR("recv error: %s", strerror(errno));
@@ -197,7 +197,7 @@ static void handle_socket_event(void)
             ASSERT_MSG(missing_bytes <= OVERFLOW_BUFFER_SIZE, "not enough space in overflow buffer. consider increasing the size");
 
             // Read into OVERFLOW_BUFFER of the recv_buffer and proceed to packet interpretation
-            i64 new_bytes_read = recv(client_socket, &recv_buffer[INPUT_BUFFER_SIZE], missing_bytes, 0);
+            i64 new_bytes_read = net_recv(client_socket, &recv_buffer[INPUT_BUFFER_SIZE], missing_bytes, 0);
             UNUSED(new_bytes_read); // prevents compiler warning in release mode
             ASSERT(new_bytes_read == missing_bytes);
         }
@@ -211,10 +211,7 @@ static void handle_socket_event(void)
                 received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_PING];
                 packet_ping_t *data = (packet_ping_t *)(buffer + PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]);
 
-                struct timespec ts;
-                clock_gettime(CLOCK_MONOTONIC, &ts);
-                u64 time_now = (u64)(ts.tv_sec * 1000000000 + ts.tv_nsec);
-
+                u64 time_now = clock_get_absolute_time_ns();
                 f64 ping_ms = (time_now - data->time) / 1000000.0;
                 LOG_TRACE("ping = %fms", ping_ms);
             } break;
@@ -551,6 +548,22 @@ static void display_debug_info(void)
     snprintf(buffer, sizeof(buffer), "camera position: x=%.2f y=%.2f", game_camera.position.x, game_camera.position.y);
     renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, 0.6f);
     memset(buffer, 0, sizeof(buffer));
+
+    static u64 network_up = 0.0f;
+    static u64 network_down = 0.0f;
+    net_get_bandwidth(&network_up, &network_down);
+
+    position.y -= font_height;
+
+    snprintf(buffer, sizeof(buffer), "network up: %llu bytes/s", network_up);
+    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, 0.6f);
+    memset(buffer, 0, sizeof(buffer));
+
+    position.y -= font_height;
+
+    snprintf(buffer, sizeof(buffer), "network down: %llu bytes/s", network_down);
+    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, 0.6f);
+    memset(buffer, 0, sizeof(buffer));
 }
 #endif
 
@@ -703,6 +716,7 @@ int main(int argc, char *argv[])
         f64 now = glfwGetTime();
         delta_time = now - last_time;
         last_time = now;
+        net_update(delta_time);
 
         check_camera_movement();
 

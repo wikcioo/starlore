@@ -185,7 +185,12 @@ void player_self_update(player_self_t *player, f64 delta_time)
     u32 mods = 0;
     vec2 movement = vec2_zero();
 
-    if (player_keys_state[KEYCODE_W]) {
+    if (player_keys_state[KEYCODE_Space] && attack_ready) {
+        key = KEYCODE_Space;
+        player->base.state = PLAYER_STATE_ATTACK;
+        attack_ready = false;
+        attack_cooldown_accumulator = 0.0f;
+    } else if (player_keys_state[KEYCODE_W]) {
         key = KEYCODE_W;
         movement.y += PLAYER_VELOCITY;
         player->base.direction = PLAYER_DIRECTION_UP;
@@ -230,14 +235,7 @@ void player_self_update(player_self_t *player, f64 delta_time)
             player->base.state = PLAYER_STATE_WALK;
         }
     } else {
-        if (player_keys_state[KEYCODE_Space]) {
-            if (attack_ready) {
-                key = KEYCODE_Space;
-                player->base.state = PLAYER_STATE_ATTACK;
-                attack_ready = false;
-                attack_cooldown_accumulator = 0.0f;
-            }
-        } else if (player->base.state != PLAYER_STATE_DEAD) {
+        if (player->base.state != PLAYER_STATE_DEAD) {
             player->base.state = PLAYER_STATE_IDLE;
             return;
         } else {

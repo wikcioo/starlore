@@ -8,12 +8,13 @@
 #include <poll.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <time.h>
 #include <errno.h>
 #include <signal.h>
 #include <pthread.h>
 
 #include "defines.h"
+#include "common/net.h"
+#include "common/clock.h"
 #include "common/player_types.h"
 #include "common/global.h"
 #include "common/packet.h"
@@ -131,14 +132,11 @@ static b8 receive_client_data(i32 client_socket, u8 *recv_buffer, u32 buffer_siz
 
 b8 validate_incoming_client(i32 client_socket)
 {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-
-    u64 puzzle_value = (u64)ts.tv_nsec;
+    u64 puzzle_value = clock_get_absolute_time_ns();
 
     i64 bytes_read, bytes_sent;
 
-    bytes_sent = send(client_socket, (void *)&puzzle_value, sizeof(puzzle_value), 0);
+    bytes_sent = net_send(client_socket, (void *)&puzzle_value, sizeof(puzzle_value), 0);
     if (bytes_sent == -1) {
         LOG_ERROR("validation: send error: %s", strerror(errno));
         return false;
@@ -150,7 +148,7 @@ b8 validate_incoming_client(i32 client_socket)
     u64 answer = puzzle_value ^ 0xDEADBEEFCAFEBABE; /* TODO: Come up with a better validation function */
 
     u64 result_buffer;
-    bytes_read = recv(client_socket, (void *)&result_buffer, sizeof(result_buffer), 0);
+    bytes_read = net_recv(client_socket, (void *)&result_buffer, sizeof(result_buffer), 0);
     if (bytes_read <= 0) {
         if (bytes_read == -1) {
             LOG_ERROR("validation: recv error: %s", strerror(errno));
@@ -163,7 +161,7 @@ b8 validate_incoming_client(i32 client_socket)
 
     if (bytes_read == sizeof(result_buffer)) {
         b8 status_buffer = result_buffer == answer;
-        bytes_sent = send(client_socket, (void *)&status_buffer, sizeof(status_buffer), 0);
+        bytes_sent = net_send(client_socket, (void *)&status_buffer, sizeof(status_buffer), 0);
         if (bytes_sent == -1) {
             LOG_ERROR("validation status: send error: %s", strerror(errno));
             return false;
@@ -356,7 +354,7 @@ b8 receive_client_data(i32 client_socket, u8 *recv_buffer, u32 buffer_size, i64 
     ASSERT(recv_buffer);
     ASSERT(bytes_read);
 
-    *bytes_read = recv(client_socket, recv_buffer, buffer_size, 0);
+    *bytes_read = net_recv(client_socket, recv_buffer, buffer_size, 0);
     if (*bytes_read <= 0) {
         if (*bytes_read == -1) {
             LOG_ERROR("recv error: %s", strerror(errno));
@@ -586,14 +584,14 @@ void handle_client_event(i32 client_socket)
                 i32 header_bytes_left = packet_header_size - bytes_remaining;
 
                 // Read remaining header bytes into the INPUT_OVERFLOW_BUFFER_SIZE memory
-                i32 remaining_header_bytes_read = recv(client_socket, &recv_buffer[INPUT_BUFFER_SIZE], header_bytes_left, 0);
+                i32 remaining_header_bytes_read = net_recv(client_socket, &recv_buffer[INPUT_BUFFER_SIZE], header_bytes_left, 0);
                 UNUSED(remaining_header_bytes_read); // prevents compiler warning in release mode
                 ASSERT(remaining_header_bytes_read == header_bytes_left);
 
                 // Now the recv_buffer should be filled with additional 'header_bytes_left' bytes so we can inspect the header values
                 // Finish the iteration by handling the packet type from the header, by reading additional header->size bytes and handling the packet
                 u8 *next_packet_data_ptr = (u8 *)next_header + packet_header_size;
-                received_packet_data_size = recv(client_socket, next_packet_data_ptr, next_header->size, 0);
+                received_packet_data_size = net_recv(client_socket, next_packet_data_ptr, next_header->size, 0);
                 ASSERT(received_packet_data_size == next_header->size);
 
                 handle_packet_type(client_socket, next_packet_data_ptr, next_header->type, NULL);
@@ -849,6 +847,7 @@ void *process_input_queue(void *args)
     static const f64 delta_time = 1.0 / SERVER_TICK_RATE;
     while (running) {
         process_pending_input(delta_time);
+        net_update(delta_time);
         usleep(us_to_sleep);
     }
 
