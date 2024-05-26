@@ -55,6 +55,11 @@ typedef struct {
     player_direction_e direction;
     player_state_e state;
     f32 respawn_cooldown;
+    f32 attack_cooldown;
+    f32 attack_accumulator;
+    f32 roll_start;
+    f32 roll_cooldown;
+    f32 roll_accumulator;
 } player_t;
 
 typedef struct {
@@ -626,72 +631,99 @@ static b8 rect_collide(vec2 center1, vec2 size1, vec2 center2, vec2 size2)
 
 static b8 is_player_key(u32 key)
 {
-    return key == KEYCODE_W || key == KEYCODE_S || key == KEYCODE_A || key == KEYCODE_D || key == KEYCODE_Space;
+    return key == KEYCODE_W || key == KEYCODE_S || key == KEYCODE_A || key == KEYCODE_D || key == KEYCODE_Space || key == KEYCODE_LeftShift;
 }
 
 static void process_player_input(u32 key, u32 mods, player_t *player, u32 damaged_players[MAX_PLAYER_COUNT])
 {
-    if (key == KEYCODE_W) {
-        player->position.y += PLAYER_VELOCITY;
-        player->direction = PLAYER_DIRECTION_UP;
-        if (mods & KEYMOD_SHIFT) {
-            player->position.y += PLAYER_VELOCITY;
-            player->state = PLAYER_STATE_ROLL;
-        } else {
-            player->state = PLAYER_STATE_WALK;
+    if (key == KEYCODE_LeftShift) {
+        if (player->roll_cooldown > 0.0f) {
+            LOG_WARN("received LeftShift keypress (roll) but roll_cooldown > 0");
+            return;
         }
-    } else if (key == KEYCODE_S) {
-        player->position.y -= PLAYER_VELOCITY;
-        player->direction = PLAYER_DIRECTION_DOWN;
-        player->state = PLAYER_STATE_WALK;
-        if (mods & KEYMOD_SHIFT) {
-            player->position.y -= PLAYER_VELOCITY;
-            player->state = PLAYER_STATE_ROLL;
-        }
-    } else if (key == KEYCODE_A) {
-        player->position.x -= PLAYER_VELOCITY;
-        player->direction = PLAYER_DIRECTION_LEFT;
-        player->state = PLAYER_STATE_WALK;
-        if (mods & KEYMOD_SHIFT) {
-            player->position.x -= PLAYER_VELOCITY;
-            player->state = PLAYER_STATE_ROLL;
-        }
-    } else if (key == KEYCODE_D) {
-        player->position.x += PLAYER_VELOCITY;
-        player->direction = PLAYER_DIRECTION_RIGHT;
-        player->state = PLAYER_STATE_WALK;
-        if (mods & KEYMOD_SHIFT) {
-            player->position.x += PLAYER_VELOCITY;
-            player->state = PLAYER_STATE_ROLL;
-        }
-    } else if (key == KEYCODE_Space) {
-        player->state = PLAYER_STATE_ATTACK;
-
-        static const f32 size = 32.0f;
-
-        vec2 attack_center = player->position;
-        vec2 attack_size = vec2_create(size, size);
+        player->state = PLAYER_STATE_ROLL;
+        player->roll_cooldown = PLAYER_ROLL_COOLDOWN;
+        player->roll_accumulator = 0.0f;
         if (player->direction == PLAYER_DIRECTION_UP) {
-            attack_center.y += size/2;
-            attack_size.y /= 3.0f;
+            player->roll_start = player->position.y;
+            player->position.y += PLAYER_ROLL_DISTANCE;
         } else if (player->direction == PLAYER_DIRECTION_DOWN) {
-            attack_center.y -= size/2;
-            attack_size.y /= 3.0f;
+            player->roll_start = player->position.y;
+            player->position.y -= PLAYER_ROLL_DISTANCE;
         } else if (player->direction == PLAYER_DIRECTION_LEFT) {
-            attack_center.x -= size/2;
-            attack_size.x /= 3.0f;
+            player->roll_start = player->position.x;
+            player->position.x -= PLAYER_ROLL_DISTANCE;
         } else if (player->direction == PLAYER_DIRECTION_RIGHT) {
-            attack_center.x += size/2;
-            attack_size.x /= 3.0f;
+            player->roll_start = player->position.x;
+            player->position.x += PLAYER_ROLL_DISTANCE;
         }
+    } else {
+        if (key == KEYCODE_Space) {
+            if (player->attack_cooldown > 0.0f) {
+                LOG_WARN("received Space keypress (attack) but attack_cooldown > 0");
+                return;
+            }
+            player->state = PLAYER_STATE_ATTACK;
+            player->attack_cooldown = PLAYER_ATTACK_COOLDOWN;
+            player->attack_accumulator = 0.0f;
 
-        for (i32 j = 0; j < MAX_PLAYER_COUNT; j++) {
-            if (players[j].id != PLAYER_INVALID_ID && players[j].id != player->id) {
-                player_t *other_player = &players[j];
-                if (rect_collide(attack_center, attack_size, other_player->position, vec2_create(size, size))) {
-                    damaged_players[j] += PLAYER_DAMAGE_VALUE;
+            static const f32 size = 32.0f;
+
+            vec2 attack_center = player->position;
+            vec2 attack_size = vec2_create(size, size);
+            if (player->direction == PLAYER_DIRECTION_UP) {
+                attack_center.y += size/2;
+                attack_size.y /= 3.0f;
+            } else if (player->direction == PLAYER_DIRECTION_DOWN) {
+                attack_center.y -= size/2;
+                attack_size.y /= 3.0f;
+            } else if (player->direction == PLAYER_DIRECTION_LEFT) {
+                attack_center.x -= size/2;
+                attack_size.x /= 3.0f;
+            } else if (player->direction == PLAYER_DIRECTION_RIGHT) {
+                attack_center.x += size/2;
+                attack_size.x /= 3.0f;
+            }
+
+            for (i32 j = 0; j < MAX_PLAYER_COUNT; j++) {
+                if (players[j].id != PLAYER_INVALID_ID && players[j].id != player->id) {
+                    player_t *other_player = &players[j];
+                    if (rect_collide(attack_center, attack_size, other_player->position, vec2_create(size, size))) {
+                        damaged_players[j] += PLAYER_DAMAGE_VALUE;
+                    }
                 }
             }
+        }
+
+        f32 velocity = CLIENT_TICK_DURATION * PLAYER_VELOCITY;
+        if (key == KEYCODE_W) {
+            player->position.y += velocity;
+            player->position.y = (i32)player->position.y;
+            if (player->state != PLAYER_STATE_ATTACK || player->direction != PLAYER_DIRECTION_UP) {
+                player->state = PLAYER_STATE_WALK;
+            }
+            player->direction = PLAYER_DIRECTION_UP;
+        } else if (key == KEYCODE_S) {
+            player->position.y -= velocity;
+            player->position.y = (i32)player->position.y;
+            if (player->state != PLAYER_STATE_ATTACK || player->direction != PLAYER_DIRECTION_DOWN) {
+                player->state = PLAYER_STATE_WALK;
+            }
+            player->direction = PLAYER_DIRECTION_DOWN;
+        } else if (key == KEYCODE_A) {
+            player->position.x -= velocity;
+            player->position.x = (i32)player->position.x;
+            if (player->state != PLAYER_STATE_ATTACK || player->direction != PLAYER_DIRECTION_LEFT) {
+                player->state = PLAYER_STATE_WALK;
+            }
+            player->direction = PLAYER_DIRECTION_LEFT;
+        } else if (key == KEYCODE_D) {
+            player->position.x += velocity;
+            player->position.x = (i32)player->position.x;
+            if (player->state != PLAYER_STATE_ATTACK || player->direction != PLAYER_DIRECTION_RIGHT) {
+                player->state = PLAYER_STATE_WALK;
+            }
+            player->direction = PLAYER_DIRECTION_RIGHT;
         }
     }
 }
@@ -736,15 +768,26 @@ void process_pending_input(f64 delta_time)
     }
 
     for (u64 i = 0; i < MAX_PLAYER_COUNT; i++) {
+        player_t *player = &players[i];
         // Check if new input has been processed for a player
         if (modified_players[i] > 0) {
+            vec2 position = player->position;
+            // Roll was just initiated, so the update will contain new state and the initial roll position
+            if (player->roll_cooldown == PLAYER_ROLL_COOLDOWN) {
+                if (player->direction == PLAYER_DIRECTION_UP || player->direction == PLAYER_DIRECTION_DOWN) {
+                    position.y = player->roll_start;
+                } else if (player->direction == PLAYER_DIRECTION_LEFT || player->direction == PLAYER_DIRECTION_RIGHT) {
+                    position.x = player->roll_start;
+                }
+            }
+
             // Send updated players' state to all other players including the sender
             packet_player_update_t player_update_packet = {
-                .seq_nr = players[i].seq_nr,
-                .id = players[i].id,
-                .position = players[i].position,
-                .direction = players[i].direction,
-                .state = players[i].state
+                .seq_nr    = player->seq_nr,
+                .id        = player->id,
+                .position  = position,
+                .direction = player->direction,
+                .state     = player->state
             };
 
             for (i32 j = 0; j < MAX_PLAYER_COUNT; j++) {
@@ -757,23 +800,23 @@ void process_pending_input(f64 delta_time)
         }
 
         // Check if any damage was dealt to a player
-        if (damaged_players[i] > 0 && players[i].health > 0) {
-            players[i].health -= damaged_players[i];
+        if (damaged_players[i] > 0 && player->health > 0) {
+            player->health -= damaged_players[i];
             packet_player_death_t player_death_packet = {0};
             packet_message_t message_death_packet = {0};
 
-            b8 player_died = players[i].health <= 0;
+            b8 player_died = player->health <= 0;
 
             if (player_died) {
-                players[i].state = PLAYER_STATE_DEAD;
-                players[i].respawn_cooldown = PLAYER_RESPAWN_COOLDOWN;
-                player_death_packet.id = players[i].id;
+                player->state = PLAYER_STATE_DEAD;
+                player->respawn_cooldown = PLAYER_RESPAWN_COOLDOWN;
+                player_death_packet.id = player->id;
 
                 message_death_packet.type = MESSAGE_TYPE_SYSTEM;
                 snprintf(message_death_packet.content,
                          sizeof(message_death_packet.content),
                          "player <%s> died! respawning in %.2f seconds...",
-                         players[i].name, PLAYER_RESPAWN_COOLDOWN);
+                         player->name, PLAYER_RESPAWN_COOLDOWN);
 
                 message_t msg = {0};
                 msg.type = MESSAGE_TYPE_SYSTEM;
@@ -783,7 +826,7 @@ void process_pending_input(f64 delta_time)
 
             // Send health updates to all players
             packet_player_health_t player_health_packet = {
-                .id = players[i].id,
+                .id     = player->id,
                 .damage = damaged_players[i]
             };
 
@@ -806,24 +849,26 @@ void process_pending_input(f64 delta_time)
         }
     }
 
-    // Check if any players are dead and should be respawned
     for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
-        if (players[i].id != PLAYER_INVALID_ID) {
-            if (players[i].state == PLAYER_STATE_DEAD) {
-                if (players[i].respawn_cooldown <= 0.0f) {
+        player_t *player = &players[i];
+        if (player->id != PLAYER_INVALID_ID) {
+            b8 should_update = false;
+            // Check if any players are dead and should be respawned
+            if (player->state == PLAYER_STATE_DEAD) {
+                if (player->respawn_cooldown <= 0.0f) {
                     // Found player who should be respawned
                     // Update player state and send respawn packet to all players
-                    players[i].state = PLAYER_STATE_IDLE;
-                    players[i].health = PLAYER_START_HEALTH;
-                    players[i].position = PLAYER_SPAWN_POSITION;
-                    players[i].direction = PLAYER_DIRECTION_DOWN;
+                    player->state = PLAYER_STATE_IDLE;
+                    player->health = PLAYER_START_HEALTH;
+                    player->position = PLAYER_SPAWN_POSITION;
+                    player->direction = PLAYER_DIRECTION_DOWN;
 
                     packet_player_respawn_t player_respawn_packet = {
-                        .id        = players[i].id,
-                        .health    = players[i].health,
-                        .state     = players[i].state,
-                        .position  = players[i].position,
-                        .direction = players[i].direction
+                        .id        = player->id,
+                        .health    = player->health,
+                        .state     = player->state,
+                        .position  = player->position,
+                        .direction = player->direction
                     };
 
                     for (i32 j = 0; j < MAX_PLAYER_COUNT; j++) {
@@ -834,8 +879,48 @@ void process_pending_input(f64 delta_time)
                         }
                     }
                 } else {
-                    players[i].respawn_cooldown -= delta_time;
+                    player->respawn_cooldown -= delta_time;
                 }
+            } else if (player->state == PLAYER_STATE_ROLL) {
+                player->roll_accumulator += delta_time;
+                if (player->roll_accumulator >= PLAYER_ROLL_DURATION) {
+                    player->roll_accumulator = 0.0f;
+                    player->state = PLAYER_STATE_IDLE;
+                    should_update = true;
+                }
+            } else if (player->state == PLAYER_STATE_ATTACK) {
+                player->attack_accumulator += delta_time;
+                if (player->attack_accumulator >= PLAYER_ATTACK_DURATION) {
+                    player->attack_accumulator = 0.0f;
+                    player->state = PLAYER_STATE_IDLE;
+                    should_update = true;
+                }
+            }
+
+            if (should_update) {
+                packet_player_update_t player_update_packet = {
+                    .seq_nr    = player->seq_nr,
+                    .id        = player->id,
+                    .position  = player->position,
+                    .direction = player->direction,
+                    .state     = player->state
+                };
+
+                for (i32 j = 0; j < MAX_PLAYER_COUNT; j++) {
+                    if (players[j].id != PLAYER_INVALID_ID && players[j].id != player->id) {
+                        if (!packet_send(players[j].socket, PACKET_TYPE_PLAYER_UPDATE, &player_update_packet)) {
+                            LOG_ERROR("failed to send player update packet");
+                        }
+                    }
+                }
+            }
+
+            // Update cooldowns
+            if (player->attack_cooldown > 0.0f) {
+                player->attack_cooldown -= delta_time;
+            }
+            if (player->roll_cooldown > 0.0f) {
+                player->roll_cooldown -= delta_time;
             }
         }
     }

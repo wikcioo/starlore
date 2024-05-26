@@ -30,6 +30,18 @@ typedef struct {
     i32 health;
     player_state_e state;
     player_direction_e direction;
+
+    b8 attack_ready;
+    f32 attack_progress;
+    f32 attack_cooldown_accumulator;
+
+    b8 roll_ready;
+    f32 roll_progress;
+    f32 roll_cooldown_accumulator;
+    f32 roll_start;
+    f32 roll_end;
+    player_direction_e roll_direction;
+
     struct {
         struct {
             u8 keyframe_index;

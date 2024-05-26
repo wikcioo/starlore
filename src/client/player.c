@@ -134,6 +134,8 @@ static void player_base_create(player_id id, const char *name, vec2 position, ve
     out_player_base->health = health;
     out_player_base->state = state;
     out_player_base->direction = direction;
+    out_player_base->attack_ready = true;
+    out_player_base->roll_ready = true;
 }
 
 void player_self_create(const char *name, packet_player_init_t *packet, player_self_t *out_player_self)
@@ -172,78 +174,143 @@ void player_self_update(player_self_t *player, f64 delta_time)
         return;
     }
 
-    static f32 attack_cooldown_accumulator = 0.0f;
-    static b8 attack_ready = true;
-    if (!attack_ready) {
-        attack_cooldown_accumulator += delta_time;
+    if (!player->base.attack_ready) {
+        player->base.attack_cooldown_accumulator += delta_time;
+        if (player->base.attack_cooldown_accumulator >= PLAYER_ATTACK_COOLDOWN) {
+            player->base.attack_cooldown_accumulator = 0.0f;
+            player->base.attack_ready = true;
+        }
     }
-    if (attack_cooldown_accumulator >= PLAYER_ATTACK_COOLDOWN) {
-        attack_ready = true;
+
+    if (!player->base.roll_ready) {
+        player->base.roll_cooldown_accumulator += delta_time;
+        if (player->base.roll_cooldown_accumulator >= PLAYER_ROLL_COOLDOWN) {
+            player->base.roll_cooldown_accumulator = 0.0f;
+            player->base.roll_ready = true;
+        }
     }
 
     u32 key = 0;
     u32 mods = 0;
     vec2 movement = vec2_zero();
 
-    if (player_keys_state[KEYCODE_Space] && attack_ready) {
-        key = KEYCODE_Space;
-        player->base.state = PLAYER_STATE_ATTACK;
-        attack_ready = false;
-        attack_cooldown_accumulator = 0.0f;
-    } else if (player_keys_state[KEYCODE_W]) {
-        key = KEYCODE_W;
-        movement.y += PLAYER_VELOCITY;
-        player->base.direction = PLAYER_DIRECTION_UP;
-        if (player_keys_state[KEYCODE_LeftShift]) {
-            mods = KEYMOD_SHIFT;
-            player->base.state = PLAYER_STATE_ROLL;
-            movement.y += PLAYER_VELOCITY;
-        } else {
-            player->base.state = PLAYER_STATE_WALK;
+    if (player->base.state == PLAYER_STATE_ROLL) {
+        player->base.roll_progress += delta_time;
+        f32 t = player->base.roll_progress / PLAYER_ROLL_DURATION;
+        if (t >= 1.0f) {
+            t = 1.0f;
+            player->base.roll_progress = 0.0f;
+            player->base.state = PLAYER_STATE_IDLE;
         }
-    } else if (player_keys_state[KEYCODE_S]) {
-        key = KEYCODE_S;
-        movement.y -= PLAYER_VELOCITY;
-        player->base.direction = PLAYER_DIRECTION_DOWN;
-        if (player_keys_state[KEYCODE_LeftShift]) {
-            mods = KEYMOD_SHIFT;
-            player->base.state = PLAYER_STATE_ROLL;
-            movement.y -= PLAYER_VELOCITY;
-        } else {
-            player->base.state = PLAYER_STATE_WALK;
+        f32 roll_pos = math_lerpf(player->base.roll_start, player->base.roll_end, t);
+        player_direction_e roll_dir = player->base.roll_direction;
+        if (roll_dir == PLAYER_DIRECTION_UP || roll_dir == PLAYER_DIRECTION_DOWN) {
+            player->base.position.y = roll_pos;
+        } else if (roll_dir == PLAYER_DIRECTION_LEFT || roll_dir == PLAYER_DIRECTION_RIGHT) {
+            player->base.position.x = roll_pos;
         }
-    } else if (player_keys_state[KEYCODE_A]) {
-        key = KEYCODE_A;
-        movement.x -= PLAYER_VELOCITY;
-        player->base.direction = PLAYER_DIRECTION_LEFT;
-        if (player_keys_state[KEYCODE_LeftShift]) {
-            mods = KEYMOD_SHIFT;
-            player->base.state = PLAYER_STATE_ROLL;
-            movement.x -= PLAYER_VELOCITY;
-        } else {
-            player->base.state = PLAYER_STATE_WALK;
-        }
-    } else if (player_keys_state[KEYCODE_D]) {
-        key = KEYCODE_D;
-        movement.x += PLAYER_VELOCITY;
-        player->base.direction = PLAYER_DIRECTION_RIGHT;
-        if (player_keys_state[KEYCODE_LeftShift]) {
-            mods = KEYMOD_SHIFT;
-            player->base.state = PLAYER_STATE_ROLL;
-            movement.x += PLAYER_VELOCITY;
-        } else {
-            player->base.state = PLAYER_STATE_WALK;
+
+        if (is_camera_locked_on_player) {
+            vec2 window_size = window_get_size();
+            camera_set_position(&game_camera, vec2_sub(player->base.position, vec2_divide(window_size, 2)));
         }
     } else {
-        if (player->base.state != PLAYER_STATE_DEAD) {
-            player->base.state = PLAYER_STATE_IDLE;
-            return;
+        if (player->base.state == PLAYER_STATE_ATTACK) {
+            player->base.attack_progress += delta_time;
+            f32 t = player->base.attack_progress / PLAYER_ATTACK_DURATION;
+            if (t >= 1.0f) {
+                player->base.attack_progress = 0.0f;
+                player->base.state = PLAYER_STATE_IDLE;
+            }
+        }
+
+        if (player_keys_state[KEYCODE_LeftShift] && player->base.roll_ready) {
+            // NOTE: cancels the attack
+            player->base.roll_ready = false;
+            key = KEYCODE_LeftShift;
+            player->base.roll_progress = 0.0f;
+            player->base.state = PLAYER_STATE_ROLL;
+            player_reset_player_animation(&player->base);
+            if (player->base.direction == PLAYER_DIRECTION_UP) {
+                player->base.roll_direction = PLAYER_DIRECTION_UP;
+                player->base.roll_start = player->base.position.y;
+                player->base.roll_end = player->base.position.y + PLAYER_ROLL_DISTANCE;
+            } else if (player->base.direction == PLAYER_DIRECTION_DOWN) {
+                player->base.roll_direction = PLAYER_DIRECTION_DOWN;
+                player->base.roll_start = player->base.position.y;
+                player->base.roll_end = player->base.position.y - PLAYER_ROLL_DISTANCE;
+            } else if (player->base.direction == PLAYER_DIRECTION_LEFT) {
+                player->base.roll_direction = PLAYER_DIRECTION_LEFT;
+                player->base.roll_start = player->base.position.x;
+                player->base.roll_end = player->base.position.x - PLAYER_ROLL_DISTANCE;
+            } else if (player->base.direction == PLAYER_DIRECTION_RIGHT) {
+                player->base.roll_direction = PLAYER_DIRECTION_RIGHT;
+                player->base.roll_start = player->base.position.x;
+                player->base.roll_end = player->base.position.x + PLAYER_ROLL_DISTANCE;
+            }
         } else {
-            return;
+            if (player_keys_state[KEYCODE_Space] && player->base.attack_ready) {
+                player->base.attack_ready = false;
+                key = KEYCODE_Space;
+                player->base.attack_progress = 0.0f;
+                player->base.state = PLAYER_STATE_ATTACK;
+                player_reset_player_animation(&player->base);
+            }
+
+            f32 velocity = delta_time * PLAYER_VELOCITY;
+            if (player_keys_state[KEYCODE_W]) {
+                if (key != KEYCODE_Space) {
+                    key = KEYCODE_W;
+                }
+                movement.y += velocity;
+                // reset animation to walking if player not attacking or changed direction
+                if (player->base.state != PLAYER_STATE_ATTACK || player->base.direction != PLAYER_DIRECTION_UP) {
+                    player->base.state = PLAYER_STATE_WALK;
+                }
+                player->base.direction = PLAYER_DIRECTION_UP;
+            } else if (player_keys_state[KEYCODE_S]) {
+                if (key != KEYCODE_Space) {
+                    key = KEYCODE_S;
+                }
+                movement.y -= velocity;
+                // reset animation to walking if player not attacking or changed direction
+                if (player->base.state != PLAYER_STATE_ATTACK || player->base.direction != PLAYER_DIRECTION_DOWN) {
+                    player->base.state = PLAYER_STATE_WALK;
+                }
+                player->base.direction = PLAYER_DIRECTION_DOWN;
+            } else if (player_keys_state[KEYCODE_A]) {
+                if (key != KEYCODE_Space) {
+                    key = KEYCODE_A;
+                }
+                movement.x -= velocity;
+                // reset animation to walking if player not attacking or changed direction
+                if (player->base.state != PLAYER_STATE_ATTACK || player->base.direction != PLAYER_DIRECTION_LEFT) {
+                    player->base.state = PLAYER_STATE_WALK;
+                }
+                player->base.direction = PLAYER_DIRECTION_LEFT;
+            } else if (player_keys_state[KEYCODE_D]) {
+                if (key != KEYCODE_Space) {
+                    key = KEYCODE_D;
+                }
+                movement.x += velocity;
+                // reset animation to walking if player not attacking or changed direction
+                if (player->base.state != PLAYER_STATE_ATTACK || player->base.direction != PLAYER_DIRECTION_RIGHT) {
+                    player->base.state = PLAYER_STATE_WALK;
+                }
+                player->base.direction = PLAYER_DIRECTION_RIGHT;
+            } else {
+                if (player->base.state != PLAYER_STATE_ATTACK && player->base.state != PLAYER_STATE_ROLL) {
+                    player->base.state = PLAYER_STATE_IDLE;
+                }
+            }
         }
     }
 
-    player->base.position = vec2_add(player->base.position, movement);
+    if (key == 0 && mods == 0) {
+        return;
+    }
+
+    player->base.position = vec2_add(player->base.position, vec2_create((i32)movement.x, (i32)movement.y));
 
     vec2 window_size = window_get_size();
     if (is_camera_locked_on_player) {
@@ -290,19 +357,19 @@ void player_self_handle_authoritative_update(player_self_t *player, packet_playe
 
             u32 nth_element = 0;
             while (ring_buffer_peek_from_end(player->keypress_ring_buffer, nth_element++, &keypress)) {
-                i32 multiplier = (keypress.mods & KEYMOD_SHIFT) ? 2 : 1;
+                f32 velocity = CLIENT_TICK_DURATION * PLAYER_VELOCITY;
                 if (keypress.key == KEYCODE_W) {
-                    player->base.position.y += PLAYER_VELOCITY * multiplier;
+                    player->base.position.y += velocity;
                 } else if (keypress.key == KEYCODE_S) {
-                    player->base.position.y -= PLAYER_VELOCITY * multiplier;
+                    player->base.position.y -= velocity;
                 } else if (keypress.key == KEYCODE_A) {
-                    player->base.position.x -= PLAYER_VELOCITY * multiplier;
+                    player->base.position.x -= velocity;
                 } else if (keypress.key == KEYCODE_D) {
-                    player->base.position.x += PLAYER_VELOCITY * multiplier;
+                    player->base.position.x += velocity;
                 }
             }
             if (is_camera_locked_on_player) {
-                camera_set_position(&game_camera, vec2_sub(player->base.position, vec2_divide(window_size, 2)));
+                camera_set_position(&game_camera, vec2_sub(vec2_create((i32)player->base.position.x, (i32)player->base.position.y), vec2_divide(window_size, 2)));
             }
             break;
         }
@@ -315,8 +382,42 @@ void player_remote_handle_authoritative_update(player_remote_t *player, packet_p
     player->is_interpolated = true;
     player->no_update_accumulator = 0.0f;
     player->base.position = packet->position;
+    b8 was_previous_state_attack = player->base.state == PLAYER_STATE_ATTACK;
     player->base.state = packet->state;
+    if (player->base.state == PLAYER_STATE_ATTACK) {
+        if (!was_previous_state_attack) {
+            player_reset_player_animation(&player->base);
+        }
+        if (player->base.direction != packet->direction) {
+            // If the direction was changed since attack, switch to idle animation
+            player->base.state = PLAYER_STATE_IDLE;
+        }
+    }
     player->base.direction = packet->direction;
+
+    if (player->base.state == PLAYER_STATE_ROLL) {
+        player->base.roll_ready = false;
+        player->base.roll_progress = 0.0f;
+        player->base.state = PLAYER_STATE_ROLL;
+        player_reset_player_animation(&player->base);
+        if (player->base.direction == PLAYER_DIRECTION_UP) {
+            player->base.roll_direction = PLAYER_DIRECTION_UP;
+            player->base.roll_start = player->base.position.y;
+            player->base.roll_end = player->base.position.y + PLAYER_ROLL_DISTANCE;
+        } else if (player->base.direction == PLAYER_DIRECTION_DOWN) {
+            player->base.roll_direction = PLAYER_DIRECTION_DOWN;
+            player->base.roll_start = player->base.position.y;
+            player->base.roll_end = player->base.position.y - PLAYER_ROLL_DISTANCE;
+        } else if (player->base.direction == PLAYER_DIRECTION_LEFT) {
+            player->base.roll_direction = PLAYER_DIRECTION_LEFT;
+            player->base.roll_start = player->base.position.x;
+            player->base.roll_end = player->base.position.x - PLAYER_ROLL_DISTANCE;
+        } else if (player->base.direction == PLAYER_DIRECTION_RIGHT) {
+            player->base.roll_direction = PLAYER_DIRECTION_RIGHT;
+            player->base.roll_start = player->base.position.x;
+            player->base.roll_end = player->base.position.x + PLAYER_ROLL_DISTANCE;
+        }
+    }
 }
 
 void player_take_damage(player_base_t *player, u32 damage)
@@ -327,6 +428,7 @@ void player_take_damage(player_base_t *player, u32 damage)
         player->state = PLAYER_STATE_DEAD;
         player->animation.player.keyframe_index = 0;
         player->animation.player.accumulator = 0.0f;
+        player->animation.damage.is_damaged = false;
     }
 }
 
@@ -353,7 +455,7 @@ static void player_base_render(player_base_t *base, f64 delta_time, vec2 positio
     vec2 tex_coord[4] = {0};
     memcpy(tex_coord, animation_tex_coord, sizeof(vec2) * 4);
 
-    if (base->animation.damage.is_damaged && base->animation.damage.accumulator >= PLAYER_ATTACK_COOLDOWN) {
+    if (base->animation.damage.is_damaged && base->animation.damage.accumulator >= PLAYER_DAMAGED_HIGHLIGHT_DURATION) {
         base->animation.damage.is_damaged = false;
         base->animation.damage.accumulator = 0.0f;
     }
@@ -392,8 +494,8 @@ void player_self_render(player_self_t *player, f64 delta_time)
     player_base_render(&player->base, delta_time, player->base.position);
 
     vec2 username_position = vec2_create(
-        player->base.position.x - (renderer_get_font_width(FA16) * strlen(player->base.name))/2,
-        player->base.position.y + KEYFRAME_HEIGHT_PX/2 + 7.0f
+        (i32)(player->base.position.x - (renderer_get_font_width(FA16) * strlen(player->base.name))/2),
+        (i32)(player->base.position.y + KEYFRAME_HEIGHT_PX/2 + 7.0)
     );
     renderer_draw_text(player->base.name, FA16, username_position, 1.0f, COLOR_MILK, 1.0f);
 }
@@ -404,17 +506,33 @@ void player_remote_render(player_remote_t *player, f64 delta_time, f32 server_up
 
     // Check if there were no updates recently, and if so, reset the animation to idle
     player->no_update_accumulator += delta_time;
-    if (player->base.state != PLAYER_STATE_DEAD ) {
-        f32 cooldown = player->base.state == PLAYER_STATE_ATTACK ? (PLAYER_ATTACK_COOLDOWN * 3.0f) : PLAYER_ANIMATION_FRAME_DURATION;
+    if (player->base.state != PLAYER_STATE_DEAD && player->base.state != PLAYER_STATE_ROLL) {
+        f32 cooldown = player->base.state == PLAYER_STATE_ATTACK ? (PLAYER_ATTACK_DURATION) : PLAYER_ANIMATION_FRAME_DURATION;
         if (player->no_update_accumulator >= cooldown) {
             player->no_update_accumulator = 0.0f;
             player->base.state = PLAYER_STATE_IDLE;
-            player_reset_player_animation(&player->base);
+        }
+    }
+
+    if (player->base.state == PLAYER_STATE_ROLL) {
+        player->base.roll_progress += delta_time;
+        f32 t = player->base.roll_progress / PLAYER_ROLL_DURATION;
+        if (t >= 1.0f) {
+            t = 1.0f;
+            player->base.roll_progress = 0.0f;
+            player->base.state = PLAYER_STATE_IDLE;
+        }
+        f32 roll_pos = math_lerpf(player->base.roll_start, player->base.roll_end, t);
+        player_direction_e roll_dir = player->base.roll_direction;
+        if (roll_dir == PLAYER_DIRECTION_UP || roll_dir == PLAYER_DIRECTION_DOWN) {
+            player->base.position.y = roll_pos;
+        } else if (roll_dir == PLAYER_DIRECTION_LEFT || roll_dir == PLAYER_DIRECTION_RIGHT) {
+            player->base.position.x = roll_pos;
         }
     }
 
     vec2 position;
-    if (player->is_interpolated) {
+    if (player->is_interpolated && player->base.state != PLAYER_STATE_ROLL) {
         // Interpolate player's position based on the current and last position and time since last server update
         f32 t = server_update_accumulator * SERVER_TICK_RATE;
         if (t > 1.0f) {
@@ -438,8 +556,8 @@ void player_remote_render(player_remote_t *player, f64 delta_time, f32 server_up
     snprintf(buffer, sizeof(buffer), "%s (%d)", player->base.name, player->base.health);
 
     vec2 username_position = vec2_create(
-        position.x - (renderer_get_font_width(FA16) * strlen(buffer))/2,
-        position.y + KEYFRAME_HEIGHT_PX/2 + 7.0f
+        (i32)(position.x - (renderer_get_font_width(FA16) * strlen(buffer))/2),
+        (i32)(position.y + KEYFRAME_HEIGHT_PX/2 + 7.0f)
     );
     renderer_draw_text(buffer, FA16, username_position, 1.0f, COLOR_MILK, 1.0f);
 }
@@ -466,9 +584,6 @@ b8 player_key_pressed_event_callback(event_code_e code, event_data_t data)
     u16 key = data.u16[0];
     if (key == KEYCODE_W || key == KEYCODE_S || key == KEYCODE_A || key == KEYCODE_D || key == KEYCODE_Space || key == KEYCODE_LeftShift) {
         player_keys_state[key] = INPUTACTION_Press;
-        if (player_self_ref->base.state != PLAYER_STATE_DEAD) {
-            player_reset_player_animation(&player_self_ref->base);
-        }
         return true;
     }
 

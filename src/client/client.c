@@ -41,8 +41,6 @@
 #define OVERFLOW_BUFFER_SIZE 1024
 #define POLL_INFINITE_TIMEOUT -1
 
-#define CLIENT_TICK_DURATION (1.0f / CLIENT_TICK_RATE)
-
 static u32 remote_player_count = 0;
 static player_remote_t remote_players[MAX_PLAYER_COUNT];
 static player_self_t self_player;
@@ -527,7 +525,7 @@ static void display_build_version(void)
 }
 
 #if defined(DEBUG)
-static void display_debug_info(void)
+static void display_debug_info(f64 delta_time)
 {
     u32 font_height = renderer_get_font_height(FA16);
     vec2 position = vec2_create(3.0f, window_get_size().y - 50);
@@ -562,6 +560,42 @@ static void display_debug_info(void)
     position.y -= font_height;
 
     snprintf(buffer, sizeof(buffer), "network down: %llu bytes/s", network_down);
+    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, 0.6f);
+    memset(buffer, 0, sizeof(buffer));
+
+    static f32 update_fps_period = 0.5f;
+    static f32 update_fps_accumulator = 0.0f;
+    static f32 dt = 0.0f;
+
+    update_fps_accumulator += delta_time;
+    if (update_fps_accumulator >= update_fps_period) {
+        dt = delta_time;
+        update_fps_accumulator = 0.0f;
+    }
+
+    position.y -= font_height;
+
+    snprintf(buffer, sizeof(buffer), "fps: %d", (u32)(1.0f / dt));
+    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, 0.6f);
+    memset(buffer, 0, sizeof(buffer));
+
+    position.y -= font_height;
+
+    if (self_player.base.attack_ready) {
+        snprintf(buffer, sizeof(buffer), "attack ready");
+    } else {
+        snprintf(buffer, sizeof(buffer), "attack cooldown: %0.2fs", PLAYER_ATTACK_COOLDOWN - self_player.base.attack_cooldown_accumulator);
+    }
+    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, 0.6f);
+    memset(buffer, 0, sizeof(buffer));
+
+    position.y -= font_height;
+
+    if (self_player.base.roll_ready) {
+        snprintf(buffer, sizeof(buffer), "roll ready");
+    } else {
+        snprintf(buffer, sizeof(buffer), "roll cooldown: %0.2fs", PLAYER_ROLL_COOLDOWN - self_player.base.roll_cooldown_accumulator);
+    }
     renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, 0.6f);
     memset(buffer, 0, sizeof(buffer));
 }
@@ -724,7 +758,7 @@ int main(int argc, char *argv[])
         client_update_accumulator += delta_time;
 
         if (client_update_accumulator >= CLIENT_TICK_DURATION) {
-            player_self_update(&self_player, delta_time);
+            player_self_update(&self_player, CLIENT_TICK_DURATION);
             client_update_accumulator = 0.0f;
         }
 
@@ -760,7 +794,7 @@ int main(int argc, char *argv[])
         renderer_draw_text(health_buffer, FA32, health_position, 1.0f, COLOR_MILK, 1.0f);
 
 #if defined(DEBUG)
-        display_debug_info();
+        display_debug_info(delta_time);
 #endif
 
         window_poll_events();
