@@ -70,9 +70,12 @@ void texture_create_from_spec(texture_specification_t spec, void *data, texture_
 {
     ASSERT(out_texture);
 
-    memset(out_texture, 0, sizeof(texture_t));
-
     u32 format = image_format_to_opengl_format(spec.format);
+
+    memset(out_texture, 0, sizeof(texture_t));
+    out_texture->width = spec.width;
+    out_texture->height = spec.height;
+    out_texture->format = format;
 
     glGenTextures(1, &out_texture->id);
     glBindTexture(GL_TEXTURE_2D, out_texture->id);
@@ -81,6 +84,16 @@ void texture_create_from_spec(texture_specification_t spec, void *data, texture_
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexImage2D(GL_TEXTURE_2D, 0, format, spec.width, spec.height, 0, format, GL_UNSIGNED_BYTE, data);
+
+    if (spec.generate_mipmaps) {
+        glGenerateMipmap(GL_TEXTURE_2D);
+    }
+}
+
+void texture_set_data(texture_t *texture, void *data)
+{
+    glBindTexture(GL_TEXTURE_2D, texture->id);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, texture->width, texture->height, texture->format, GL_UNSIGNED_BYTE, data);
 }
 
 void texture_destroy(texture_t *texture)

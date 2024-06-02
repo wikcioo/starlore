@@ -8,8 +8,9 @@
 #include "common/logger.h"
 #include "common/input_codes.h"
 
+vec2 main_window_size;
+
 static GLFWwindow *main_window;
-static vec2 main_window_size;
 static b8 is_cursor_captured;
 
 static void glfw_error_callback(i32 code, const char *description)
@@ -42,6 +43,11 @@ static void glfw_mouse_button_callback(GLFWwindow* window, int button, int actio
     if (action == INPUTACTION_Press) {
         event_system_fire(EVENT_CODE_MOUSE_BUTTON_PRESSED, (event_data_t){ .u8[0]=button });
     }
+}
+
+static void glfw_mouse_scrolled_callback(GLFWwindow* window, double xoffset, double yoffset)
+{
+    event_system_fire(EVENT_CODE_MOUSE_SCROLLED, (event_data_t){ .f32[0] = xoffset, .f32[1] = yoffset });
 }
 
 static void glfw_mouse_moved_callback(GLFWwindow *window, f64 xpos, f64 ypos)
@@ -86,6 +92,7 @@ b8 window_create(u32 width, u32 height, const char *title)
     glfwSetKeyCallback            (main_window, glfw_key_callback);
     glfwSetCharCallback           (main_window, glfw_char_callback);
     glfwSetMouseButtonCallback    (main_window, glfw_mouse_button_callback);
+    glfwSetScrollCallback         (main_window, glfw_mouse_scrolled_callback);
     glfwSetCursorPosCallback      (main_window, glfw_mouse_moved_callback);
     glfwSetFramebufferSizeCallback(main_window, glfw_framebuffer_size_callback);
     glfwSetWindowCloseCallback    (main_window, glfw_window_close_callback);

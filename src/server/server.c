@@ -22,6 +22,8 @@
 #include "common/asserts.h"
 #include "common/maths.h"
 #include "common/input_codes.h"
+#include "common/perlin_noise.h"
+#include "common/game_world_types.h"
 #include "common/containers/darray.h"
 #include "common/containers/ring_buffer.h"
 
@@ -36,7 +38,7 @@
 
 #define MAX_MESSAGE_LENGTH 1024
 
-#define PLAYER_SPAWN_POSITION vec2_create(1280/2, 720/2)
+#define PLAYER_SPAWN_POSITION vec2_create(0, 0)
 
 typedef struct {
     struct pollfd *fds;
@@ -76,6 +78,8 @@ static player_t players[MAX_PLAYER_COUNT];
 static player_id current_player_id = 1000;
 static void *input_ring_buffer;
 static message_t *messages;
+
+static game_world_t game_world;
 
 void server_pfd_init(u32 initial_capacity, server_pfd_t *out_server_pfd)
 {
@@ -318,6 +322,39 @@ void handle_new_player_connection(i32 client_socket)
     msg.type = MESSAGE_TYPE_SYSTEM;
     memcpy(msg.content, message_packet.content, strlen(message_packet.content));
     darray_push(messages, msg);
+
+    // Send game world initialization data to the new player
+    packet_game_world_init_t world_init_packet = {0};
+    memcpy(&world_init_packet.map, &game_world.map, sizeof(game_map_t));
+
+    if (!packet_send(players[new_player_idx].socket, PACKET_TYPE_GAME_WORLD_INIT, &world_init_packet)) {
+        LOG_ERROR("failed to send world init packet");
+    }
+
+    // Send game world objects to the new player
+    i32 num_transfers = ((darray_length(game_world.objects) - 1) / MAX_GAME_OBJECTS_TRANSFER) + 1;
+    u64 obj_count = darray_length(game_world.objects);
+    for (i32 i = 0; i < num_transfers; i++) {
+        i32 length;
+        if (obj_count >= MAX_GAME_OBJECTS_TRANSFER) {
+            length = MAX_GAME_OBJECTS_TRANSFER;
+        } else {
+            length = obj_count % MAX_GAME_OBJECTS_TRANSFER;
+        }
+
+        obj_count -= length;
+
+        i32 offset = i * MAX_GAME_OBJECTS_TRANSFER;
+
+        packet_world_object_add_t world_object_add_packet = {0};
+        world_object_add_packet.length = length;
+
+        memcpy(world_object_add_packet.objects, (game_world.objects + offset), length * sizeof(game_object_t));
+
+        if (!packet_send(players[new_player_idx].socket, PACKET_TYPE_GAME_WORLD_OBJECT_ADD, &world_object_add_packet)) {
+            LOG_ERROR("failed to send world add object packet (transfer number: %d)", i);
+        }
+    }
 }
 
 void handle_new_connection_request_event(void)
@@ -1011,6 +1048,52 @@ int main(int argc, char *argv[])
 
     input_ring_buffer = ring_buffer_reserve(INPUT_RING_BUFFER_CAPACITY, sizeof(packet_player_keypress_t));
     messages = darray_create(sizeof(message_t));
+
+    // Initialize game world
+    game_world.map.width = 64;
+    game_world.map.height = 64;
+    game_world.map.seed = math_random();
+    game_world.map.octave_count = 4;
+    game_world.map.bias = 0.1f;
+    game_world.objects = darray_create(sizeof(game_object_t));
+
+    f32 *perlin_noise_data = malloc(game_world.map.width * game_world.map.height * sizeof(f32));
+
+    perlin_noise_config_t config = {
+        .width = game_world.map.width,
+        .height = game_world.map.height,
+        .seed = game_world.map.seed,
+        .octave_count = game_world.map.octave_count,
+        .scaling_bias = game_world.map.bias
+    };
+
+    perlin_noise_generate_2d(config, perlin_noise_data);
+
+    for (i32 i = 0; i < game_world.map.width * game_world.map.height; i++) {
+        if (perlin_noise_data[i] >= 0.45f && perlin_noise_data[i] < 0.8f) {
+            // Spawn random vegetation on grass tiles
+            f32 r = math_frandom();
+            if (0.0f <= r && r < 0.01f) { // ~1% chance of spawning a bush
+                game_object_t obj = {
+                    .type = GAME_OBJECT_TYPE_BUSH,
+                    .tile_index = i
+                };
+                darray_push(game_world.objects, obj);
+            }
+        } else if (perlin_noise_data[i] < 0.4f) {
+            // Spawn lilies on water tiles
+            f32 r = math_frandom();
+            if (0.0f <= r && r < 0.01f) { // ~1% chance of spawning a lily
+                game_object_t obj = {
+                    .type = GAME_OBJECT_TYPE_LILY,
+                    .tile_index = i
+                };
+                darray_push(game_world.objects, obj);
+            }
+        }
+    }
+
+    free(perlin_noise_data);
 
     struct sigaction sa = {0};
     sa.sa_flags = SA_RESTART; // Restart functions interruptable by EINTR like poll()

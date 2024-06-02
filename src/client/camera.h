@@ -11,4 +11,4 @@ typedef struct {
 void camera_create(camera_t *out_camera, vec2 position);
 void camera_move(camera_t *camera, vec2 offset);
 void camera_set_position(camera_t *camera, vec2 position);
-void camera_resize(camera_t *camera, u32 width, u32 height);
+void camera_recalculate_projection(camera_t *camera);

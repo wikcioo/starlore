@@ -17,10 +17,6 @@
 #define PLAYER_ANIMATION_KEYFRAME_COUNT 4
 #define PLAYER_ANIMATION_FRAME_DURATION (1.0f / PLAYER_ANIMATION_FPS)
 
-#define TEX_COORD_COUNT 4
-#define KEYFRAME_WIDTH_PX 32
-#define KEYFRAME_HEIGHT_PX 32
-
 extern i32 client_socket;
 extern camera_t game_camera;
 extern b8 is_camera_locked_on_player;
@@ -40,8 +36,8 @@ void player_load_animations(void)
 {
     texture_create_from_path("assets/textures/animation/player_spritesheet.png", &player_animation_spritesheet);
 
-    f32 keyframe_width_uv = (f32)KEYFRAME_WIDTH_PX / player_animation_spritesheet.width;
-    f32 keyframe_height_uv = (f32)KEYFRAME_HEIGHT_PX / player_animation_spritesheet.height;
+    f32 keyframe_width_uv = (f32)TILE_WIDTH_PX / player_animation_spritesheet.width;
+    f32 keyframe_height_uv = (f32)TILE_HEIGHT_PX / player_animation_spritesheet.height;
 
     u32 row = 4;
     for (u32 dir = 0; dir < PLAYER_DIRECTION_COUNT; dir++) {
@@ -211,8 +207,7 @@ void player_self_update(player_self_t *player, f64 delta_time)
         }
 
         if (is_camera_locked_on_player) {
-            vec2 window_size = window_get_size();
-            camera_set_position(&game_camera, vec2_sub(player->base.position, vec2_divide(window_size, 2)));
+            camera_set_position(&game_camera, player->base.position);
         }
     } else {
         if (player->base.state == PLAYER_STATE_ATTACK) {
@@ -312,9 +307,8 @@ void player_self_update(player_self_t *player, f64 delta_time)
 
     player->base.position = vec2_add(player->base.position, vec2_create((i32)movement.x, (i32)movement.y));
 
-    vec2 window_size = window_get_size();
     if (is_camera_locked_on_player) {
-        camera_set_position(&game_camera, vec2_sub(player->base.position, vec2_divide(window_size, 2)));
+        camera_set_position(&game_camera, player->base.position);
     }
 
     packet_player_keypress_t player_keypress_packet = {
@@ -339,7 +333,6 @@ void player_self_update(player_self_t *player, f64 delta_time)
 
 void player_self_handle_authoritative_update(player_self_t *player, packet_player_update_t *packet)
 {
-    vec2 window_size = window_get_size();
     for (;;) {
         b8 dequeue_status;
         packet_player_keypress_t keypress = {0};
@@ -369,7 +362,7 @@ void player_self_handle_authoritative_update(player_self_t *player, packet_playe
                 }
             }
             if (is_camera_locked_on_player) {
-                camera_set_position(&game_camera, vec2_sub(vec2_create((i32)player->base.position.x, (i32)player->base.position.y), vec2_divide(window_size, 2)));
+                camera_set_position(&game_camera, vec2_create((i32)player->base.position.x, (i32)player->base.position.y));
             }
             break;
         }
@@ -468,7 +461,7 @@ static void player_base_render(player_base_t *base, f64 delta_time, vec2 positio
 
     renderer_draw_sprite_uv_color(&player_animation_spritesheet,
                                   tex_coord,
-                                  vec2_create(KEYFRAME_WIDTH_PX, KEYFRAME_HEIGHT_PX),
+                                  vec2_create(TILE_WIDTH_PX, TILE_HEIGHT_PX),
                                   position,
                                   2.0f, 0.0f,
                                   color, 1.0f);
@@ -495,7 +488,7 @@ void player_self_render(player_self_t *player, f64 delta_time)
 
     vec2 username_position = vec2_create(
         (i32)(player->base.position.x - (renderer_get_font_width(FA16) * strlen(player->base.name))/2),
-        (i32)(player->base.position.y + KEYFRAME_HEIGHT_PX/2 + 7.0)
+        (i32)(player->base.position.y + TILE_HEIGHT_PX/2 + 7.0)
     );
     renderer_draw_text(player->base.name, FA16, username_position, 1.0f, COLOR_MILK, 1.0f);
 }
@@ -557,7 +550,7 @@ void player_remote_render(player_remote_t *player, f64 delta_time, f32 server_up
 
     vec2 username_position = vec2_create(
         (i32)(position.x - (renderer_get_font_width(FA16) * strlen(buffer))/2),
-        (i32)(position.y + KEYFRAME_HEIGHT_PX/2 + 7.0f)
+        (i32)(position.y + TILE_HEIGHT_PX/2 + 7.0f)
     );
     renderer_draw_text(buffer, FA16, username_position, 1.0f, COLOR_MILK, 1.0f);
 }

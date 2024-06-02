@@ -16,6 +16,7 @@ b8 chat_key_pressed_event_callback(event_code_e code, event_data_t data);
 b8 chat_key_repeated_event_callback(event_code_e code, event_data_t data);
 b8 chat_char_pressed_event_callback(event_code_e code, event_data_t data);
 b8 chat_mouse_button_pressed_event_callback(event_code_e code, event_data_t data);
+b8 chat_window_resized_event_callback(event_code_e code, event_data_t data);
 
 void chat_add_player_message(chat_player_message_t message);
 void chat_add_system_message(const char *message);

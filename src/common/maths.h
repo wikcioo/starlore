@@ -129,6 +129,13 @@ INLINE vec2 vec2_negate(vec2 vector) {
     };
 }
 
+INLINE vec2 vec2_mul(vec2 vector, f32 scalar) {
+    return (vec2) {
+        .x = vector.x * scalar,
+        .y = vector.y * scalar
+    };
+}
+
 INLINE vec2 vec2_divide(vec2 vector, f32 scalar) {
     return (vec2) {
         .x = vector.x / scalar,

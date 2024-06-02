@@ -21,8 +21,10 @@ typedef struct {
     u32 id;
     u32 width;
     u32 height;
+    u32 format;
 } texture_t;
 
 void texture_create_from_path(const char *filepath, texture_t *out_texture);
 void texture_create_from_spec(texture_specification_t spec, void *data, texture_t *out_texture);
+void texture_set_data(texture_t *texture, void *data);
 void texture_destroy(texture_t *texture);

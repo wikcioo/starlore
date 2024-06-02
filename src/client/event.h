@@ -54,6 +54,8 @@ typedef enum {
 
     EVENT_CODE_WINDOW_MAXIMIZED,
 
+    EVENT_CODE_GAME_WORLD_INIT,
+
     EVENT_CODE_COUNT
 } event_code_e;
 
@@ -84,3 +86,4 @@ void event_system_shutdown(void);
 void event_system_register(event_code_e code, fp_event_callback callback);
 void event_system_unregister(event_code_e code, fp_event_callback callback);
 void event_system_fire(event_code_e code, event_data_t data);
+void event_system_poll_events(void);

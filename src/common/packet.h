@@ -4,6 +4,9 @@
 #include "common/maths.h"
 #include "common/global.h"
 #include "common/player_types.h"
+#include "common/game_world_types.h"
+
+#define MAX_GAME_OBJECTS_TRANSFER 16
 
 typedef enum {
     PACKET_TYPE_NONE,
@@ -20,6 +23,8 @@ typedef enum {
     PACKET_TYPE_PLAYER_DEATH,
     PACKET_TYPE_PLAYER_RESPAWN,
     PACKET_TYPE_PLAYER_KEYPRESS,
+    PACKET_TYPE_GAME_WORLD_INIT,
+    PACKET_TYPE_GAME_WORLD_OBJECT_ADD,
     PACKET_TYPE_COUNT
 } packet_type_e;
 
@@ -112,21 +117,32 @@ typedef struct {
     u32 action;
 } packet_player_keypress_t;
 
+typedef struct {
+    game_map_t map;
+} packet_game_world_init_t;
+
+typedef struct {
+    u32 length;
+    game_object_t objects[MAX_GAME_OBJECTS_TRANSFER];
+} packet_world_object_add_t;
+
 static const u32 PACKET_TYPE_SIZE[PACKET_TYPE_COUNT] = {
-    [PACKET_TYPE_NONE]              = 0,
-    [PACKET_TYPE_HEADER]            = sizeof(packet_header_t),
-    [PACKET_TYPE_PING]              = sizeof(packet_ping_t),
-    [PACKET_TYPE_MESSAGE]           = sizeof(packet_message_t),
-    [PACKET_TYPE_MESSAGE_HISTORY]   = sizeof(packet_message_history_t),
-    [PACKET_TYPE_PLAYER_INIT]       = sizeof(packet_player_init_t),
-    [PACKET_TYPE_PLAYER_INIT_CONF]  = sizeof(packet_player_init_confirm_t),
-    [PACKET_TYPE_PLAYER_ADD]        = sizeof(packet_player_add_t),
-    [PACKET_TYPE_PLAYER_REMOVE]     = sizeof(packet_player_remove_t),
-    [PACKET_TYPE_PLAYER_UPDATE]     = sizeof(packet_player_update_t),
-    [PACKET_TYPE_PLAYER_HEALTH]     = sizeof(packet_player_health_t),
-    [PACKET_TYPE_PLAYER_DEATH]      = sizeof(packet_player_death_t),
-    [PACKET_TYPE_PLAYER_RESPAWN]    = sizeof(packet_player_respawn_t),
-    [PACKET_TYPE_PLAYER_KEYPRESS]   = sizeof(packet_player_keypress_t)
+    [PACKET_TYPE_NONE]                   = 0,
+    [PACKET_TYPE_HEADER]                 = sizeof(packet_header_t),
+    [PACKET_TYPE_PING]                   = sizeof(packet_ping_t),
+    [PACKET_TYPE_MESSAGE]                = sizeof(packet_message_t),
+    [PACKET_TYPE_MESSAGE_HISTORY]        = sizeof(packet_message_history_t),
+    [PACKET_TYPE_PLAYER_INIT]            = sizeof(packet_player_init_t),
+    [PACKET_TYPE_PLAYER_INIT_CONF]       = sizeof(packet_player_init_confirm_t),
+    [PACKET_TYPE_PLAYER_ADD]             = sizeof(packet_player_add_t),
+    [PACKET_TYPE_PLAYER_REMOVE]          = sizeof(packet_player_remove_t),
+    [PACKET_TYPE_PLAYER_UPDATE]          = sizeof(packet_player_update_t),
+    [PACKET_TYPE_PLAYER_HEALTH]          = sizeof(packet_player_health_t),
+    [PACKET_TYPE_PLAYER_DEATH]           = sizeof(packet_player_death_t),
+    [PACKET_TYPE_PLAYER_RESPAWN]         = sizeof(packet_player_respawn_t),
+    [PACKET_TYPE_PLAYER_KEYPRESS]        = sizeof(packet_player_keypress_t),
+    [PACKET_TYPE_GAME_WORLD_INIT]        = sizeof(packet_game_world_init_t),
+    [PACKET_TYPE_GAME_WORLD_OBJECT_ADD]  = sizeof(packet_world_object_add_t)
 };
 
 b8 packet_send(i32 socket, u32 type, void *packet_data);

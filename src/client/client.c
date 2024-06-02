@@ -23,6 +23,7 @@
 #include "chat.h"
 #include "window.h"
 #include "player.h"
+#include "game_world.h"
 #include "camera.h"
 #include "color_palette.h"
 #include "common/net.h"
@@ -41,6 +42,13 @@
 #define OVERFLOW_BUFFER_SIZE 1024
 #define POLL_INFINITE_TIMEOUT -1
 
+extern vec2 main_window_size;
+
+#if defined(DEBUG)
+static b8 show_perlin_noise_texture = false;
+extern texture_t perlin_noise_texture;
+#endif
+
 static u32 remote_player_count = 0;
 static player_remote_t remote_players[MAX_PLAYER_COUNT];
 static player_self_t self_player;
@@ -55,6 +63,9 @@ static u32 input_count = 0;
 static b8 running = false;
 
 static vec2 mouse_position;
+
+static b8 game_world_initialized = false;
+static game_world_t game_world;
 
 // Data referenced from somewhere else
 char username[PLAYER_MAX_NAME_LENGTH];
@@ -269,6 +280,8 @@ static void handle_socket_event(void)
                 if (!packet_send(client_socket, PACKET_TYPE_PLAYER_INIT_CONF, &player_confirm_packet)) {
                     LOG_ERROR("failed to send player init confirm packet");
                 }
+
+                camera_set_position(&game_camera, self_player.base.position);
             } break;
             case PACKET_TYPE_PLAYER_ADD: {
                 received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_PLAYER_ADD];
@@ -398,6 +411,26 @@ static void handle_socket_event(void)
                     LOG_ERROR("failed to update respawn of player with id=%u", player_respawn_packet->id);
                 }
             } break;
+            case PACKET_TYPE_GAME_WORLD_INIT: {
+                received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_GAME_WORLD_INIT];
+                packet_game_world_init_t *game_world_init_packet = (packet_game_world_init_t *)(buffer + PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]);
+
+                LOG_TRACE("game world init packet received: width=%u, height=%u, seed=%u, octave_count=%i, bias=%.2f",
+                          game_world_init_packet->map.width,
+                          game_world_init_packet->map.height,
+                          game_world_init_packet->map.seed,
+                          game_world_init_packet->map.octave_count,
+                          game_world_init_packet->map.bias);
+
+                game_world_init(game_world_init_packet, &game_world);
+                event_system_fire(EVENT_CODE_GAME_WORLD_INIT, (event_data_t){0});
+            } break;
+            case PACKET_TYPE_GAME_WORLD_OBJECT_ADD: {
+                received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_GAME_WORLD_OBJECT_ADD];
+                packet_world_object_add_t *world_object_add_packet = (packet_world_object_add_t *)(buffer + PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]);
+
+                game_world_add_objects(&game_world, world_object_add_packet->objects, world_object_add_packet->length);
+            } break;
             default:
                 LOG_WARN("received unknown packet type, ignoring...");
         }
@@ -458,11 +491,17 @@ static b8 key_pressed_event_callback(event_code_e code, event_data_t data)
     } else if (key == KEYCODE_Y) {
         is_camera_locked_on_player = !is_camera_locked_on_player;
         if (is_camera_locked_on_player) {
-            vec2 window_size = window_get_size();
-            camera_set_position(&game_camera, vec2_sub(self_player.base.position, vec2_divide(window_size, 2)));
+            camera_set_position(&game_camera, self_player.base.position);
         }
         return true;
     }
+
+#if defined(DEBUG)
+    if (key == KEYCODE_M) {
+        show_perlin_noise_texture = !show_perlin_noise_texture;
+        return true;
+    }
+#endif
 
     return false;
 }
@@ -496,16 +535,23 @@ static b8 window_closed_event_callback(event_code_e code, event_data_t data)
 
 static b8 window_resized_event_callback(event_code_e code, event_data_t data)
 {
-    u32 width = data.u32[0];
-    u32 height = data.u32[1];
-
-    camera_resize(&ui_camera, width, height);
-    camera_resize(&game_camera, width, height);
+    camera_recalculate_projection(&ui_camera);
+    camera_recalculate_projection(&game_camera);
 
     if (is_camera_locked_on_player) {
-        camera_set_position(&game_camera, vec2_sub(self_player.base.position, vec2_create(width/2, height/2)));
+        camera_set_position(&game_camera, self_player.base.position);
     }
 
+    return false;
+}
+
+// Event fired after receiving GAME_WORLD_INIT packet
+// Made as event callback so that resources are created in the main thread with OpenGL context
+static b8 game_world_init_callback(event_code_e code, event_data_t data)
+{
+    game_world_load_resources(&game_world);
+    game_world_initialized = true;
+    LOG_TRACE("game world resources loaded");
     return false;
 }
 
@@ -516,9 +562,11 @@ static void signal_handler(i32 sig)
 
 static void display_build_version(void)
 {
+    f32 left = -main_window_size.x / 2.0f;
+    f32 top  =  main_window_size.y / 2.0f;
     renderer_draw_text(BUILD_VERSION(CLIENT_VERSION_MAJOR, CLIENT_VERSION_MINOR, CLIENT_VERSION_PATCH),
                        FA32,
-                       vec2_create(3.0f, window_get_size().y - renderer_get_font_height(FA32)),
+                       vec2_create(left + 3.0f, top - renderer_get_font_height(FA32)),
                        1.0f,
                        COLOR_MILK,
                        0.6f);
@@ -528,7 +576,7 @@ static void display_build_version(void)
 static void display_debug_info(f64 delta_time)
 {
     u32 font_height = renderer_get_font_height(FA16);
-    vec2 position = vec2_create(3.0f, window_get_size().y - 50);
+    vec2 position = vec2_create(-main_window_size.x / 2.0f + 3.0f, main_window_size.y / 2.0f - 50);
 
     char buffer[256] = {0};
     snprintf(buffer, sizeof(buffer), "cursor captured: %s", window_is_cursor_captured() ? "true" : "false");
@@ -608,13 +656,12 @@ static void check_camera_movement(void)
     }
 
     b8 camera_moved = false;
-    vec2 window_size = window_get_size();
     vec2 offset = vec2_zero();
 
     if (mouse_position.x <= CAMERA_MOVE_BORDER_OFFSET) {
         offset.x -= CAMERA_MOVE_SPEED;
         camera_moved = true;
-    } else if (mouse_position.x >= window_size.x - CAMERA_MOVE_BORDER_OFFSET - 1) {
+    } else if (mouse_position.x >= main_window_size.x - CAMERA_MOVE_BORDER_OFFSET - 1) {
         offset.x += CAMERA_MOVE_SPEED;
         camera_moved = true;
     }
@@ -622,7 +669,7 @@ static void check_camera_movement(void)
     if (mouse_position.y <= CAMERA_MOVE_BORDER_OFFSET) {
         offset.y += CAMERA_MOVE_SPEED;
         camera_moved = true;
-    } else if (mouse_position.y >= window_size.y - CAMERA_MOVE_BORDER_OFFSET - 1) {
+    } else if (mouse_position.y >= main_window_size.y - CAMERA_MOVE_BORDER_OFFSET - 1) {
         offset.y -= CAMERA_MOVE_SPEED;
         camera_moved = true;
     }
@@ -735,6 +782,8 @@ int main(int argc, char *argv[])
 
     event_system_register(EVENT_CODE_WINDOW_CLOSED, window_closed_event_callback);
     event_system_register(EVENT_CODE_WINDOW_RESIZED, window_resized_event_callback);
+    event_system_register(EVENT_CODE_WINDOW_RESIZED, chat_window_resized_event_callback);
+    event_system_register(EVENT_CODE_GAME_WORLD_INIT, game_world_init_callback);
 
     pthread_t network_thread;
     pthread_create(&network_thread, NULL, handle_networking, NULL);
@@ -752,6 +801,7 @@ int main(int argc, char *argv[])
         last_time = now;
         net_update(delta_time);
 
+        event_system_poll_events();
         check_camera_movement();
 
         server_update_accumulator += delta_time;
@@ -762,9 +812,13 @@ int main(int argc, char *argv[])
             client_update_accumulator = 0.0f;
         }
 
-        renderer_clear_screen(vec4_create(0.3f, 0.5f, 0.9f, 1.0f));
+        renderer_clear_screen(vec4_create(0.3f, 0.3f, 0.3f, 1.0f));
 
         renderer_begin_scene(&game_camera);
+
+        if (game_world_initialized) {
+            game_world_render(&game_world);
+        }
 
         // Render all other players
         for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
@@ -785,15 +839,22 @@ int main(int argc, char *argv[])
 
         char health_buffer[16];
         snprintf(health_buffer, sizeof(health_buffer), "Health: %d", self_player.base.health);
-        vec2 win_pos = window_get_size();
         f32 corner_padding = 10.0f;
         vec2 health_position = vec2_create(
-            win_pos.x - (renderer_get_font_width(FA32) * strlen(health_buffer)) - corner_padding,
-            win_pos.y - renderer_get_font_height(FA32) - corner_padding
+            main_window_size.x / 2.0f - (renderer_get_font_width(FA32) * strlen(health_buffer)) - corner_padding,
+            main_window_size.y / 2.0f - renderer_get_font_height(FA32) - corner_padding
         );
         renderer_draw_text(health_buffer, FA32, health_position, 1.0f, COLOR_MILK, 1.0f);
 
 #if defined(DEBUG)
+        if (game_world_initialized && show_perlin_noise_texture) {
+            f32 scale = 256.0f / perlin_noise_texture.width;
+            renderer_draw_sprite(&perlin_noise_texture,
+                                vec2_create(main_window_size.x / 2.0f - perlin_noise_texture.width  / 2.0f * scale,
+                                           -main_window_size.y / 2.0f + perlin_noise_texture.height / 2.0f * scale),
+                                scale, 0.0f);
+        }
+
         display_debug_info(delta_time);
 #endif
 
@@ -829,6 +890,8 @@ int main(int argc, char *argv[])
 
     event_system_unregister(EVENT_CODE_WINDOW_CLOSED, window_closed_event_callback);
     event_system_unregister(EVENT_CODE_WINDOW_RESIZED, window_resized_event_callback);
+    event_system_unregister(EVENT_CODE_WINDOW_RESIZED, chat_window_resized_event_callback);
+    event_system_unregister(EVENT_CODE_GAME_WORLD_INIT, game_world_init_callback);
 
     chat_shutdown();
     renderer_shutdown();
