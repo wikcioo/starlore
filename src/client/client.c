@@ -575,24 +575,25 @@ static void display_build_version(void)
 #if defined(DEBUG)
 static void display_debug_info(f64 delta_time)
 {
+    static const f32 alpha = 0.6f;
     u32 font_height = renderer_get_font_height(FA16);
     vec2 position = vec2_create(-main_window_size.x / 2.0f + 3.0f, main_window_size.y / 2.0f - 50);
 
     char buffer[256] = {0};
     snprintf(buffer, sizeof(buffer), "cursor captured: %s", window_is_cursor_captured() ? "true" : "false");
-    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, 0.6f);
+    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, alpha);
     memset(buffer, 0, sizeof(buffer));
 
     position.y -= font_height;
 
     snprintf(buffer, sizeof(buffer), "camera locked: %s", is_camera_locked_on_player ? "true" : "false");
-    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, 0.6f);
+    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, alpha);
     memset(buffer, 0, sizeof(buffer));
 
     position.y -= font_height;
 
     snprintf(buffer, sizeof(buffer), "camera position: x=%.2f y=%.2f", game_camera.position.x, game_camera.position.y);
-    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, 0.6f);
+    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, alpha);
     memset(buffer, 0, sizeof(buffer));
 
     static u64 network_up = 0.0f;
@@ -602,13 +603,13 @@ static void display_debug_info(f64 delta_time)
     position.y -= font_height;
 
     snprintf(buffer, sizeof(buffer), "network up: %llu bytes/s", network_up);
-    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, 0.6f);
+    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, alpha);
     memset(buffer, 0, sizeof(buffer));
 
     position.y -= font_height;
 
     snprintf(buffer, sizeof(buffer), "network down: %llu bytes/s", network_down);
-    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, 0.6f);
+    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, alpha);
     memset(buffer, 0, sizeof(buffer));
 
     static f32 update_fps_period = 0.5f;
@@ -624,7 +625,7 @@ static void display_debug_info(f64 delta_time)
     position.y -= font_height;
 
     snprintf(buffer, sizeof(buffer), "fps: %d", (u32)(1.0f / dt));
-    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, 0.6f);
+    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, alpha);
     memset(buffer, 0, sizeof(buffer));
 
     position.y -= font_height;
@@ -634,7 +635,7 @@ static void display_debug_info(f64 delta_time)
     } else {
         snprintf(buffer, sizeof(buffer), "attack cooldown: %0.2fs", PLAYER_ATTACK_COOLDOWN - self_player.base.attack_cooldown_accumulator);
     }
-    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, 0.6f);
+    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, alpha);
     memset(buffer, 0, sizeof(buffer));
 
     position.y -= font_height;
@@ -644,8 +645,13 @@ static void display_debug_info(f64 delta_time)
     } else {
         snprintf(buffer, sizeof(buffer), "roll cooldown: %0.2fs", PLAYER_ROLL_COOLDOWN - self_player.base.roll_cooldown_accumulator);
     }
-    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, 0.6f);
+    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, alpha);
     memset(buffer, 0, sizeof(buffer));
+
+    position.y -= font_height;
+
+    snprintf(buffer, sizeof(buffer), "renderer\n  quad count: %u\n  draw calls: %u", renderer_stats.quad_count, renderer_stats.draw_calls);
+    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, alpha);
 }
 #endif
 
@@ -812,6 +818,7 @@ int main(int argc, char *argv[])
             client_update_accumulator = 0.0f;
         }
 
+        renderer_reset_stats();
         renderer_clear_screen(vec4_create(0.3f, 0.3f, 0.3f, 1.0f));
 
         renderer_begin_scene(&game_camera);
@@ -832,6 +839,7 @@ int main(int argc, char *argv[])
             player_self_render(&self_player, delta_time);
         }
 
+        renderer_end_scene();
         renderer_begin_scene(&ui_camera);
 
         chat_render();
@@ -849,14 +857,21 @@ int main(int argc, char *argv[])
 #if defined(DEBUG)
         if (game_world_initialized && show_perlin_noise_texture) {
             f32 scale = 256.0f / perlin_noise_texture.width;
-            renderer_draw_sprite(&perlin_noise_texture,
-                                vec2_create(main_window_size.x / 2.0f - perlin_noise_texture.width  / 2.0f * scale,
-                                           -main_window_size.y / 2.0f + perlin_noise_texture.height / 2.0f * scale),
-                                scale, 0.0f);
+            vec2 position = vec2_create(main_window_size.x / 2.0f - perlin_noise_texture.width / 2.0f * scale - 5.0f,
+                                        -main_window_size.y / 2.0f + perlin_noise_texture.height / 2.0f * scale + 5.0f);
+            vec2 size = vec2_create(256.0f, 256.0f);
+            renderer_draw_quad_sprite(position, size, 0.0f, &perlin_noise_texture);
+
+            static const char *desc = "height map";
+            position.x -= strlen(desc) * renderer_get_font_width(FA32) / 2.0f;
+            position.y += size.y / 2.0f + 5.0f;
+            renderer_draw_text(desc, FA32, position, 1.0f, COLOR_MILK, 1.0f);
         }
 
         display_debug_info(delta_time);
 #endif
+
+        renderer_end_scene();
 
         window_poll_events();
         window_swap_buffers();

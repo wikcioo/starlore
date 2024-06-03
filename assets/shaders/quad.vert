@@ -1,15 +1,21 @@
 #version 460 core
 
-layout(location = 0) in vec2 in_position;
-layout(location = 1) in vec2 in_tex_coord;
+layout(location = 0) in vec4 in_position;
+layout(location = 1) in vec4 in_color;;
+layout(location = 2) in vec2 in_tex_coords;
+layout(location = 3) in float in_tex_index;
 
-out vec2 vs_tex_coord;
+out vec4 vs_color;
+out vec2 vs_tex_coords;
+out float vs_tex_index;
 
 uniform mat4 u_projection;
-uniform mat4 u_model;
+// uniform mat4 u_model;
 
 void main()
 {
-    gl_Position = u_projection * u_model * vec4(in_position, 0.0, 1.0);
-    vs_tex_coord = in_tex_coord;
+    vs_color = in_color;
+    vs_tex_coords = in_tex_coords;
+    vs_tex_index = in_tex_index;
+    gl_Position = u_projection * vec4(in_position);
 }

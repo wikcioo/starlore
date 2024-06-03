@@ -25,6 +25,6 @@ typedef struct {
 } texture_t;
 
 void texture_create_from_path(const char *filepath, texture_t *out_texture);
-void texture_create_from_spec(texture_specification_t spec, void *data, texture_t *out_texture);
+void texture_create_from_spec(texture_specification_t spec, void *data, texture_t *out_texture, const char *debug_name);
 void texture_set_data(texture_t *texture, void *data);
 void texture_destroy(texture_t *texture);

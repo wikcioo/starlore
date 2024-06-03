@@ -36,6 +36,11 @@ void game_world_destroy(game_world_t *game_world)
 {
     darray_destroy(map_data);
     darray_destroy(game_world->objects);
+    texture_destroy(&terrain_spritesheet);
+    texture_destroy(&vegetation_spritesheet);
+#if defined(DEBUG)
+    texture_destroy(&perlin_noise_texture);
+#endif
 }
 
 static void load_tex_coord(vec2 tex_coord[][TEX_COORD_COUNT], u32 type, f32 x, f32 y, f32 width, f32 height)
@@ -99,7 +104,7 @@ static void load_map_data(game_world_t *game_world)
         .generate_mipmaps = false
     };
 
-    texture_create_from_spec(perlin_noise_texture_spec, perlin_noise_color, &perlin_noise_texture);
+    texture_create_from_spec(perlin_noise_texture_spec, perlin_noise_color, &perlin_noise_texture, "perlin_noise");
 
     free(perlin_noise_color);
 #endif
@@ -211,15 +216,12 @@ void game_world_render(game_world_t *game_world)
                 map_start.y + (row * TILE_HEIGHT_PX)
             );
 
+            vec2 size = vec2_create(TILE_WIDTH_PX, TILE_HEIGHT_PX);
+
             vec2 tex_coord[4] = {0};
             memcpy(tex_coord, &terrain_tex_coord[tile_type], sizeof(vec2) * TEX_COORD_COUNT);
 
-            renderer_draw_sprite_uv_color(&terrain_spritesheet,
-                                          tex_coord,
-                                          vec2_create(TILE_WIDTH_PX, TILE_HEIGHT_PX),
-                                          position,
-                                          1.0f, 0.0f,
-                                          vec3_create(1.0f, 1.0f, 1.0f), 1.0f);
+            renderer_draw_quad_sprite_uv(position, size, 0.0f, &terrain_spritesheet, tex_coord);
         }
     }
 
@@ -236,15 +238,12 @@ void game_world_render(game_world_t *game_world)
                         map_start.y + (row * TILE_HEIGHT_PX)
                     );
 
+                    vec2 size = vec2_create(TILE_WIDTH_PX, TILE_HEIGHT_PX);
+
                     vec2 tex_coord[4] = {0};
                     memcpy(tex_coord, &vegetation_tex_coord[game_world->objects[i].type], sizeof(vec2) * TEX_COORD_COUNT);
 
-                    renderer_draw_sprite_uv_color(&vegetation_spritesheet,
-                                                  tex_coord,
-                                                  vec2_create(TILE_WIDTH_PX, TILE_HEIGHT_PX),
-                                                  position,
-                                                  1.0f, 0.0f,
-                                                  vec3_create(1.0f, 1.0f, 1.0f), 1.0f);
+                    renderer_draw_quad_sprite_uv(position, size, 0.0f, &vegetation_spritesheet, tex_coord);
                 }
             }
         }

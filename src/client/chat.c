@@ -310,9 +310,9 @@ void chat_render(void)
     }
 
     // Draw input box background
-    renderer_draw_quad(vec2_create(xoffset + width/2, yoffset + input_box_height/2),
-                       vec2_create(width, input_box_height),
-                       0.0f, is_input_focused ? COLOR_LIME_GREEN : COLOR_BLACK, 0.6f);
+    renderer_draw_quad_color(vec2_create(xoffset + width/2, yoffset + input_box_height/2),
+                             vec2_create(width, input_box_height),
+                             0.0f, is_input_focused ? COLOR_LIME_GREEN : COLOR_BLACK, 0.6f);
 
     if (input_count > 0) {
         // Draw characters from input buffer on the input box
@@ -339,13 +339,13 @@ void chat_render(void)
             1.0f,
             font_height
         );
-        renderer_draw_quad(cursor_position, cursor_size, 0.0f, COLOR_MILK, 1.0f);
+        renderer_draw_quad_color(cursor_position, cursor_size, 0.0f, COLOR_MILK, 1.0f);
     }
 
     // Draw messages box background
-    renderer_draw_quad(vec2_create(xoffset + width/2, yoffset + input_box_height + gap + height/2),
-                       vec2_create(width, height),
-                       0.0f, COLOR_BLACK, 0.6f);
+    renderer_draw_quad_color(vec2_create(xoffset + width/2, yoffset + input_box_height + gap + height/2),
+                             vec2_create(width, height),
+                             0.0f, COLOR_BLACK, 0.6f);
 
     // Draw messages
     u64 messages_length = darray_length(messages);

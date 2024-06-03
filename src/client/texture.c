@@ -64,9 +64,11 @@ void texture_create_from_path(const char *filepath, texture_t *out_texture)
     glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, image_data);
 
     stbi_image_free(image_data);
+
+    LOG_TRACE("created texture from path '%s' with id=%u", filepath, out_texture->id);
 }
 
-void texture_create_from_spec(texture_specification_t spec, void *data, texture_t *out_texture)
+void texture_create_from_spec(texture_specification_t spec, void *data, texture_t *out_texture, const char *debug_name)
 {
     ASSERT(out_texture);
 
@@ -88,6 +90,8 @@ void texture_create_from_spec(texture_specification_t spec, void *data, texture_
     if (spec.generate_mipmaps) {
         glGenerateMipmap(GL_TEXTURE_2D);
     }
+
+    LOG_TRACE("created texture from spec '%s' with id=%u", debug_name, out_texture->id);
 }
 
 void texture_set_data(texture_t *texture, void *data)

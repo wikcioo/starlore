@@ -189,9 +189,9 @@ INLINE mat4 mat4_multiply(mat4 matrix_0, mat4 matrix_1)
 {
     mat4 matrix = mat4_identity();
 
-    const f32* m1_ptr = matrix_1.data;
-    const f32* m2_ptr = matrix_0.data;
-    f32* dst_ptr = matrix.data;
+    const f32 *m1_ptr = matrix_1.data;
+    const f32 *m2_ptr = matrix_0.data;
+    f32 *dst_ptr = matrix.data;
 
     for (i32 i = 0; i < 4; i++) {
         for (i32 j = 0; j < 4; j++) {
@@ -205,6 +205,16 @@ INLINE mat4 mat4_multiply(mat4 matrix_0, mat4 matrix_1)
     }
 
     return matrix;
+}
+
+INLINE vec4 mat4_multiply_vec4(mat4 matrix, vec4 vector) {
+    const f32 *m_ptr = matrix.data;
+    return (vec4) {
+        .x = vector.x * m_ptr[0] + vector.y * m_ptr[4] + vector.z * m_ptr[8]  + vector.w * m_ptr[12],
+        .y = vector.x * m_ptr[1] + vector.y * m_ptr[5] + vector.z * m_ptr[9]  + vector.w * m_ptr[13],
+        .z = vector.x * m_ptr[2] + vector.y * m_ptr[6] + vector.z * m_ptr[10] + vector.w * m_ptr[14],
+        .w = vector.x * m_ptr[3] + vector.y * m_ptr[7] + vector.z * m_ptr[11] + vector.w * m_ptr[15]
+    };
 }
 
 INLINE mat4 mat4_orthographic(f32 left, f32 right, f32 bottom, f32 top, f32 near, f32 far)

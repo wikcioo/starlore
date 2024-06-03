@@ -19,6 +19,7 @@ void shader_bind(shader_t *shader);
 void shader_unbind(shader_t *shader);
 
 void shader_set_uniform_int(shader_t *shader, const char *name, i32 data);
+void shader_set_uniform_int_array(shader_t *shader, const char *name, i32 *data, u32 length);
 void shader_set_uniform_vec2(shader_t *shader, const char *name, vec2 *data);
 void shader_set_uniform_vec3(shader_t *shader, const char *name, vec3 *data);
 void shader_set_uniform_vec4(shader_t *shader, const char *name, vec4 *data);

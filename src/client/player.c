@@ -459,12 +459,8 @@ static void player_base_render(player_base_t *base, f64 delta_time, vec2 positio
         base->animation.damage.accumulator += delta_time;
     }
 
-    renderer_draw_sprite_uv_color(&player_animation_spritesheet,
-                                  tex_coord,
-                                  vec2_create(TILE_WIDTH_PX, TILE_HEIGHT_PX),
-                                  position,
-                                  2.0f, 0.0f,
-                                  color, 1.0f);
+    vec2 size = vec2_create(TILE_WIDTH_PX * 2.0f, TILE_HEIGHT_PX * 2.0f);
+    renderer_draw_quad_sprite_color_uv(position, size, 0.0f, color, 1.0f, &player_animation_spritesheet, tex_coord);
 }
 
 static void player_tick_animation(player_base_t *player, f64 delta_time)

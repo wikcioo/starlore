@@ -123,6 +123,18 @@ void shader_set_uniform_int(shader_t *shader, const char *name, i32 data)
     glUniform1i(location, data);
 }
 
+void shader_set_uniform_int_array(shader_t *shader, const char *name, i32 *data, u32 length)
+{
+    ASSERT(shader);
+    ASSERT(name);
+    ASSERT(data);
+    ASSERT(length > 0);
+
+    i32 location = glGetUniformLocation(shader->program, name);
+    ASSERT(location != -1);
+    glUniform1iv(location, length, data);
+}
+
 void shader_set_uniform_vec2(shader_t *shader, const char *name, vec2 *data)
 {
     ASSERT(shader);
