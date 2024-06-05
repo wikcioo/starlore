@@ -1,5 +1,6 @@
 # Directories
 build/
+notes/
 
 # Files
 .vscode/settings.json

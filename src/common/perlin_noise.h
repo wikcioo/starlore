@@ -3,6 +3,8 @@
 #include "defines.h"
 
 typedef struct {
+    i32 pos_x;
+    i32 pos_y;
     u32 width;
     u32 height;
     u32 seed;

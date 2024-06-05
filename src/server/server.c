@@ -1053,8 +1053,8 @@ int main(int argc, char *argv[])
     game_world.map.width = 64;
     game_world.map.height = 64;
     game_world.map.seed = math_random();
-    game_world.map.octave_count = 4;
-    game_world.map.bias = 0.1f;
+    game_world.map.octave_count = 3;
+    game_world.map.bias = 0.5f;
     game_world.objects = darray_create(sizeof(game_object_t));
 
     f32 *perlin_noise_data = malloc(game_world.map.width * game_world.map.height * sizeof(f32));

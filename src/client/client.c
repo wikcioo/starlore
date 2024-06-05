@@ -818,6 +818,9 @@ int main(int argc, char *argv[])
             client_update_accumulator = 0.0f;
         }
 
+        // NOTE: temporary
+        game_world_process_player_position(&game_world, self_player.base.position);
+
         renderer_reset_stats();
         renderer_clear_screen(vec4_create(0.3f, 0.3f, 0.3f, 1.0f));
 
