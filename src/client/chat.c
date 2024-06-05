@@ -43,6 +43,7 @@ extern char username[PLAYER_MAX_NAME_LENGTH];
 extern i32 client_socket;
 
 static font_atlas_size_e fa = FA16;
+static u32 font_bearing_y;
 static u32 font_height;
 static u32 font_width;
 static u32 num_chars_per_row;
@@ -59,6 +60,7 @@ static message_t *messages;
 void chat_init(void)
 {
     messages = darray_create(sizeof(message_t));
+    font_bearing_y = renderer_get_font_bearing_y(fa);
     font_height = renderer_get_font_height(fa);
     font_width = renderer_get_font_width(fa);
     num_chars_per_row = (width - 2 * padding) / font_width;
@@ -318,7 +320,7 @@ void chat_render(void)
         // Draw characters from input buffer on the input box
         vec2 chars_pos = vec2_create(
             xoffset + padding,
-            math_ceil(yoffset + input_box_height/2 - font_height/2)
+            math_round(yoffset + input_box_height/2.0f - font_bearing_y/2.0f)
         );
         if (input_count > num_chars_per_row) {
             char buffer[MAX_INPUT_BUFFER_LENGTH] = {0};

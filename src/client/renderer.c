@@ -35,6 +35,7 @@ typedef struct {
     u32 texture;
     u32 width;
     u32 height;
+    u32 bearing_y;
     glyph_data_t glyphs[128];
 } font_atlas_t;
 
@@ -353,6 +354,11 @@ void renderer_draw_text(const char *text, font_atlas_size_e fa_size, vec2 positi
     glDrawArrays(GL_TRIANGLES, 0, n);
 }
 
+u32 renderer_get_font_bearing_y(font_atlas_size_e fa)
+{
+    return renderer_data.font_atlases[fa].bearing_y;
+}
+
 u32 renderer_get_font_height(font_atlas_size_e fa)
 {
     return renderer_data.font_atlases[fa].height;
@@ -450,9 +456,9 @@ static void create_font_atlas(FT_Face ft_face, u32 height, font_atlas_t *out_atl
 
     memset(out_atlas, 0, sizeof(font_atlas_t));
 
-    i32 w = 0, h = 0;
+    i32 w = 0, h = 0, by = 0;
     FT_GlyphSlot g = ft_face->glyph;
-    for (i32 i = 32; i < 128; i++) {
+    for (i32 i = 32; i < 127; i++) {
         if (FT_Load_Char(ft_face, i, FT_LOAD_RENDER) != 0) {
             LOG_ERROR("failed to character '%c'", i);
             continue;
@@ -460,10 +466,12 @@ static void create_font_atlas(FT_Face ft_face, u32 height, font_atlas_t *out_atl
 
         w += g->bitmap.width;
         h = math_max(h, g->bitmap.rows);
+        by = math_max(by, g->bitmap_top);
     }
 
     out_atlas->width = w;
     out_atlas->height = h;
+    out_atlas->bearing_y = by;
 
     // Glyphs are in a 1-byte greyscale format, so disable the default 4-byte alignment restrictions
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
@@ -484,7 +492,7 @@ static void create_font_atlas(FT_Face ft_face, u32 height, font_atlas_t *out_atl
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
     i32 x = 0;
-    for (i32 i = 32; i < 128; i++) {
+    for (i32 i = 32; i < 127; i++) {
         if (FT_Load_Char(ft_face, i, FT_LOAD_RENDER)) {
             continue;
         }
