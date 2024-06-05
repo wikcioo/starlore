@@ -41,3 +41,34 @@ f32 math_frandom_range(f32 min, f32 max)
 {
     return min + ((f32)math_random() / ((f32)RAND_MAX / (max - min)));
 }
+
+f32 math_floor(f32 value)
+{
+    return floorf(value);
+}
+
+f32 math_ceil(f32 value)
+{
+    return ceilf(value);
+}
+
+f32 math_round(f32 value)
+{
+    return roundf(value);
+}
+
+vec2 vec2_normalize(vec2 vector)
+{
+    f32 length = sqrtf(vector.x * vector.x + vector.y * vector.y);
+    if (length == 0.0f) {
+        return (vec2) {
+            .x = 0.0f,
+            .y = 0.0f
+        };
+    }
+
+    return (vec2) {
+        .x = vector.x / length,
+        .y = vector.y / length
+    };
+}

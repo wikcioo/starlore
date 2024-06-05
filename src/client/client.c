@@ -655,33 +655,36 @@ static void display_debug_info(f64 delta_time)
 }
 #endif
 
-static void check_camera_movement(void)
+static void check_camera_movement(f64 delta_time)
 {
     if (!window_is_cursor_captured() || is_camera_locked_on_player) {
         return;
     }
 
-    b8 camera_moved = false;
     vec2 offset = vec2_zero();
 
+    b8 camera_moved = false;
     if (mouse_position.x <= CAMERA_MOVE_BORDER_OFFSET) {
-        offset.x -= CAMERA_MOVE_SPEED;
+        offset.x -= 1;
         camera_moved = true;
     } else if (mouse_position.x >= main_window_size.x - CAMERA_MOVE_BORDER_OFFSET - 1) {
-        offset.x += CAMERA_MOVE_SPEED;
+        offset.x += 1;
         camera_moved = true;
     }
 
     if (mouse_position.y <= CAMERA_MOVE_BORDER_OFFSET) {
-        offset.y += CAMERA_MOVE_SPEED;
+        offset.y += 1;
         camera_moved = true;
     } else if (mouse_position.y >= main_window_size.y - CAMERA_MOVE_BORDER_OFFSET - 1) {
-        offset.y -= CAMERA_MOVE_SPEED;
+        offset.y -= 1;
         camera_moved = true;
     }
 
     if (camera_moved) {
-        camera_move(&game_camera, offset);
+        f32 velocity = CAMERA_MOVE_SPEED_PPS * delta_time;
+        vec2 normalized = vec2_normalize(offset);
+        vec2 velocity_vec = vec2_mul(normalized, velocity);
+        camera_move(&game_camera, velocity_vec);
     }
 }
 
@@ -808,7 +811,7 @@ int main(int argc, char *argv[])
         net_update(delta_time);
 
         event_system_poll_events();
-        check_camera_movement();
+        check_camera_movement(delta_time);
 
         server_update_accumulator += delta_time;
         client_update_accumulator += delta_time;

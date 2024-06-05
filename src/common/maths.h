@@ -75,9 +75,13 @@ f32 math_frandom(void);
 /* min is inclusive, max is exclusive */
 f32 math_frandom_range(f32 min, f32 max);
 
-INLINE f32 math_ceil(f32 value)
+f32 math_floor(f32 value);
+f32 math_ceil(f32 value);
+f32 math_round(f32 value);
+
+INLINE f32 math_sign(f32 value)
 {
-    return (f32)((i32)(value + 0.5f));
+    return value < 0.0f ? -1.0f : 1.0f;
 }
 
 INLINE f32 math_lerpf(f32 value_0, f32 value_1, f32 t)
@@ -89,6 +93,8 @@ INLINE i32 math_max(i32 value_0, i32 value_1)
 {
     return value_0 > value_1 ? value_0 : value_1;
 }
+
+vec2 vec2_normalize(vec2 vector);
 
 INLINE vec2 vec2_zero(void)
 {
