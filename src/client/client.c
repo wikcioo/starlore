@@ -650,7 +650,7 @@ static void display_debug_info(f64 delta_time)
 
     position.y -= font_height;
 
-    snprintf(buffer, sizeof(buffer), "renderer\n  quad count: %u\n  draw calls: %u", renderer_stats.quad_count, renderer_stats.draw_calls);
+    snprintf(buffer, sizeof(buffer), "renderer\n  quad count: %u\n  char count: %u\n  draw calls: %u", renderer_stats.quad_count, renderer_stats.char_count, renderer_stats.draw_calls);
     renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, alpha);
 }
 #endif

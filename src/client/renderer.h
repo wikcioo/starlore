@@ -16,6 +16,7 @@ typedef enum {
 
 typedef struct {
     u32 quad_count;
+    u32 char_count;
     u32 draw_calls;
 } renderer_stats_t;
 

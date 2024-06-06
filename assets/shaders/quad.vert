@@ -1,7 +1,7 @@
 #version 460 core
 
 layout(location = 0) in vec4 in_position;
-layout(location = 1) in vec4 in_color;;
+layout(location = 1) in vec4 in_color;
 layout(location = 2) in vec2 in_tex_coords;
 layout(location = 3) in float in_tex_index;
 
@@ -10,7 +10,6 @@ out vec2 vs_tex_coords;
 out float vs_tex_index;
 
 uniform mat4 u_projection;
-// uniform mat4 u_model;
 
 void main()
 {
