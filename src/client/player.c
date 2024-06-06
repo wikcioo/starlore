@@ -483,8 +483,8 @@ void player_self_render(player_self_t *player, f64 delta_time)
     player_base_render(&player->base, delta_time, player->base.position);
 
     vec2 username_position = vec2_create(
-        (i32)(player->base.position.x - (renderer_get_font_width(FA16) * strlen(player->base.name))/2),
-        (i32)(player->base.position.y + TILE_HEIGHT_PX/2 + 7.0)
+        player->base.position.x - (renderer_get_font_width(FA16) * strlen(player->base.name))/2,
+        player->base.position.y + TILE_HEIGHT_PX/2 + 7.0
     );
     renderer_draw_text(player->base.name, FA16, username_position, 1.0f, COLOR_MILK, 1.0f);
 }
@@ -545,8 +545,8 @@ void player_remote_render(player_remote_t *player, f64 delta_time, f32 server_up
     snprintf(buffer, sizeof(buffer), "%s (%d)", player->base.name, player->base.health);
 
     vec2 username_position = vec2_create(
-        (i32)(position.x - (renderer_get_font_width(FA16) * strlen(buffer))/2),
-        (i32)(position.y + TILE_HEIGHT_PX/2 + 7.0f)
+        position.x - (renderer_get_font_width(FA16) * strlen(buffer))/2,
+        position.y + TILE_HEIGHT_PX/2 + 7.0f
     );
     renderer_draw_text(buffer, FA16, username_position, 1.0f, COLOR_MILK, 1.0f);
 }

@@ -527,6 +527,13 @@ static b8 mouse_moved_event_callback(event_code_e code, event_data_t data)
     return true;
 }
 
+static b8 mouse_scrolled_event_callback(event_code_e code, event_data_t data)
+{
+    f32 y_offset = data.f32[1];
+    camera_zoom(&game_camera, y_offset / 10.0f);
+    return true;
+}
+
 static b8 window_closed_event_callback(event_code_e code, event_data_t data)
 {
     running = false;
@@ -788,6 +795,7 @@ int main(int argc, char *argv[])
     event_system_register(EVENT_CODE_MOUSE_BUTTON_PRESSED, chat_mouse_button_pressed_event_callback);
     event_system_register(EVENT_CODE_MOUSE_BUTTON_PRESSED, mouse_button_pressed_event_callback);
     event_system_register(EVENT_CODE_MOUSE_MOVED, mouse_moved_event_callback);
+    event_system_register(EVENT_CODE_MOUSE_SCROLLED, mouse_scrolled_event_callback);
 
     event_system_register(EVENT_CODE_WINDOW_CLOSED, window_closed_event_callback);
     event_system_register(EVENT_CODE_WINDOW_RESIZED, window_resized_event_callback);
@@ -908,6 +916,7 @@ int main(int argc, char *argv[])
     event_system_unregister(EVENT_CODE_MOUSE_BUTTON_PRESSED, chat_mouse_button_pressed_event_callback);
     event_system_unregister(EVENT_CODE_MOUSE_BUTTON_PRESSED, mouse_button_pressed_event_callback);
     event_system_unregister(EVENT_CODE_MOUSE_MOVED, mouse_moved_event_callback);
+    event_system_unregister(EVENT_CODE_MOUSE_SCROLLED, mouse_scrolled_event_callback);
 
     event_system_unregister(EVENT_CODE_WINDOW_CLOSED, window_closed_event_callback);
     event_system_unregister(EVENT_CODE_WINDOW_RESIZED, window_resized_event_callback);
