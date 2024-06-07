@@ -835,6 +835,7 @@ int main(int argc, char *argv[])
         renderer_reset_stats();
         renderer_clear_screen(vec4_create(0.3f, 0.3f, 0.3f, 1.0f));
 
+        // Start of game rendering
         renderer_begin_scene(&game_camera);
 
         if (game_world_initialized) {
@@ -854,6 +855,8 @@ int main(int argc, char *argv[])
         }
 
         renderer_end_scene();
+
+        // Start of UI rendering
         renderer_begin_scene(&ui_camera);
 
         chat_render();

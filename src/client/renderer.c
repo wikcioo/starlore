@@ -47,6 +47,11 @@ typedef struct {
 } quad_vertex_t;
 
 typedef struct {
+    vec2 position;
+    vec4 color;
+} line_vertex_t;
+
+typedef struct {
     vec4 tex_coords;
     vec4 color;
     f32 tex_index;
@@ -73,6 +78,17 @@ typedef struct {
     u32 texture_slot_index;
 
     shader_t quad_shader;
+
+    // line data
+    u32 line_va;
+    u32 line_vb;
+
+    u32 line_vertex_count;
+
+    line_vertex_t *line_vertex_buffer_base;
+    line_vertex_t *line_vertex_buffer_ptr;
+
+    shader_t line_shader;
 
     // text data
     u32 text_va;
@@ -101,6 +117,9 @@ static void create_font_atlas(FT_Face ft_face, u32 height, font_atlas_t *out_atl
 
 b8 renderer_init(void)
 {
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
     create_shaders();
 
     // quad
@@ -178,6 +197,25 @@ b8 renderer_init(void)
     shader_bind(&renderer_data.quad_shader);
     shader_set_uniform_int_array(&renderer_data.quad_shader, "u_textures", samplers, 32);
 
+    // line
+    renderer_data.line_vertex_buffer_base = malloc(RENDERER_MAX_VERTEX_COUNT * sizeof(line_vertex_t));
+    memset(renderer_data.line_vertex_buffer_base, 0, RENDERER_MAX_VERTEX_COUNT * sizeof(line_vertex_t));
+
+    glCreateVertexArrays(1, &renderer_data.line_va);
+    glBindVertexArray(renderer_data.line_va);
+
+    glCreateBuffers(1, &renderer_data.line_vb);
+    glBindBuffer(GL_ARRAY_BUFFER, renderer_data.line_vb);
+    glBufferData(GL_ARRAY_BUFFER, RENDERER_MAX_VERTEX_COUNT * sizeof(line_vertex_t), NULL, GL_DYNAMIC_DRAW);
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(line_vertex_t), (const void *)offsetof(line_vertex_t, position));
+
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(line_vertex_t), (const void *)offsetof(line_vertex_t, color));
+
+    renderer_set_line_width(2.0f);
+
     // text
     renderer_data.text_vertex_buffer_base = malloc(RENDERER_MAX_VERTEX_COUNT * sizeof(text_vertex_t));
     memset(renderer_data.text_vertex_buffer_base, 0, RENDERER_MAX_VERTEX_COUNT * sizeof(text_vertex_t));
@@ -202,9 +240,6 @@ b8 renderer_init(void)
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, renderer_data.text_ib);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
 
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
     shader_bind(&renderer_data.text_shader);
     shader_set_uniform_int_array(&renderer_data.text_shader, "u_textures", samplers, FA_COUNT);
 
@@ -227,6 +262,7 @@ b8 renderer_init(void)
 void renderer_shutdown(void)
 {
     free(renderer_data.quad_vertex_buffer_base);
+    free(renderer_data.line_vertex_buffer_base);
     free(renderer_data.text_vertex_buffer_base);
 
     texture_destroy(&renderer_data.white_texture);
@@ -235,6 +271,10 @@ void renderer_shutdown(void)
     glDeleteVertexArrays(1, &renderer_data.quad_va);
     glDeleteBuffers(1, &renderer_data.quad_vb);
     glDeleteBuffers(1, &renderer_data.quad_ib);
+
+    shader_destroy(&renderer_data.line_shader);
+    glDeleteVertexArrays(1, &renderer_data.line_va);
+    glDeleteBuffers(1, &renderer_data.line_vb);
 
     shader_destroy(&renderer_data.text_shader);
     glDeleteVertexArrays(1, &renderer_data.text_va);
@@ -247,11 +287,15 @@ void renderer_shutdown(void)
 
 void renderer_begin_scene(camera_t *camera)
 {
-    shader_bind(&renderer_data.text_shader);
-    shader_set_uniform_mat4(&renderer_data.text_shader, "u_projection", &camera->projection);
-
+    // TODO: replace with uniform buffer
     shader_bind(&renderer_data.quad_shader);
     shader_set_uniform_mat4(&renderer_data.quad_shader, "u_projection", &camera->projection);
+
+    shader_bind(&renderer_data.line_shader);
+    shader_set_uniform_mat4(&renderer_data.line_shader, "u_projection", &camera->projection);
+
+    shader_bind(&renderer_data.text_shader);
+    shader_set_uniform_mat4(&renderer_data.text_shader, "u_projection", &camera->projection);
 
     start_batch();
 }
@@ -352,6 +396,39 @@ void renderer_draw_quad_sprite_color_uv(vec2 position, vec2 size, f32 rotation_a
     renderer_stats.quad_count++;
 }
 
+void renderer_draw_rect(vec2 position, vec2 size, vec3 color, f32 alpha)
+{
+    vec2 p0 = {{ position.x - size.x * 0.5f, position.y + size.y * 0.5f }};
+    vec2 p1 = {{ position.x + size.x * 0.5f, position.y + size.y * 0.5f }};
+    vec2 p2 = {{ position.x + size.x * 0.5f, position.y - size.y * 0.5f }};
+    vec2 p3 = {{ position.x - size.x * 0.5f, position.y - size.y * 0.5f }};
+
+    renderer_draw_line(p0, p1, color, alpha);
+    renderer_draw_line(p1, p2, color, alpha);
+    renderer_draw_line(p2, p3, color, alpha);
+    renderer_draw_line(p3, p0, color, alpha);
+}
+
+void renderer_draw_line(vec2 p1, vec2 p2, vec3 color, f32 alpha)
+{
+    vec4 c = vec4_create(color.r, color.g, color.b, alpha);
+
+    renderer_data.line_vertex_buffer_ptr->position = p1;
+    renderer_data.line_vertex_buffer_ptr->color = c;
+    renderer_data.line_vertex_buffer_ptr++;
+
+    renderer_data.line_vertex_buffer_ptr->position = p2;
+    renderer_data.line_vertex_buffer_ptr->color = c;
+    renderer_data.line_vertex_buffer_ptr++;
+
+    renderer_data.line_vertex_count += 2;
+}
+
+void renderer_set_line_width(f32 width)
+{
+    glLineWidth(width);
+}
+
 void renderer_draw_text(const char *text, font_atlas_size_e fa_size, vec2 position, f32 scale, vec3 color, f32 alpha)
 {
     ASSERT(text);
@@ -430,6 +507,9 @@ static void start_batch(void)
     renderer_data.quad_index_count = 0;
     renderer_data.quad_vertex_buffer_ptr = renderer_data.quad_vertex_buffer_base;
 
+    renderer_data.line_vertex_count = 0;
+    renderer_data.line_vertex_buffer_ptr = renderer_data.line_vertex_buffer_base;
+
     renderer_data.text_index_count = 0;
     renderer_data.text_vertex_buffer_ptr = renderer_data.text_vertex_buffer_base;
 
@@ -460,6 +540,18 @@ static void flush(void)
         renderer_stats.draw_calls++;
     }
 
+    if (renderer_data.line_vertex_count > 0) {
+        u32 size = (u32)((u8 *)renderer_data.line_vertex_buffer_ptr - (u8 *)renderer_data.line_vertex_buffer_base);
+        glBindBuffer(GL_ARRAY_BUFFER, renderer_data.line_vb);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, size, (const void *)renderer_data.line_vertex_buffer_base);
+
+        shader_bind(&renderer_data.line_shader);
+        glBindVertexArray(renderer_data.line_va);
+        glDrawArrays(GL_LINES, 0, renderer_data.line_vertex_count);
+
+        renderer_stats.draw_calls++;
+    }
+
     if (renderer_data.text_index_count > 0) {
         u32 size = (u32)((u8 *)renderer_data.text_vertex_buffer_ptr - (u8 *)renderer_data.text_vertex_buffer_base);
         glBindBuffer(GL_ARRAY_BUFFER, renderer_data.text_vb);
@@ -479,6 +571,24 @@ static void flush(void)
 
 static void create_shaders(void)
 {
+    shader_create_info_t quad_shader_create_info = {
+        .vertex_filepath = "assets/shaders/quad.vert",
+        .fragment_filepath = "assets/shaders/quad.frag"
+    };
+
+    if (!shader_create(&quad_shader_create_info, &renderer_data.quad_shader)) {
+        LOG_ERROR("failed to create quad shader");
+    }
+
+    shader_create_info_t line_shader_create_info = {
+        .vertex_filepath = "assets/shaders/line.vert",
+        .fragment_filepath = "assets/shaders/line.frag"
+    };
+
+    if (!shader_create(&line_shader_create_info, &renderer_data.line_shader)) {
+        LOG_ERROR("failed to create line shader");
+    }
+
     shader_create_info_t text_shader_create_info = {
         .vertex_filepath = "assets/shaders/text.vert",
         .fragment_filepath = "assets/shaders/text.frag"
@@ -486,15 +596,6 @@ static void create_shaders(void)
 
     if (!shader_create(&text_shader_create_info, &renderer_data.text_shader)) {
         LOG_ERROR("failed to create text shader");
-    }
-
-    shader_create_info_t quad_shader_create_info = {
-        "assets/shaders/quad.vert",
-        "assets/shaders/quad.frag"
-    };
-
-    if (!shader_create(&quad_shader_create_info, &renderer_data.quad_shader)) {
-        LOG_ERROR("failed to create quad shader");
     }
 }
 

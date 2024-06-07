@@ -311,10 +311,16 @@ void chat_render(void)
         return;
     }
 
+    vec2 input_box_position = vec2_create(xoffset + width/2, yoffset + input_box_height/2);
+    vec2 input_box_size = vec2_create(width, input_box_height);
+
     // Draw input box background
-    renderer_draw_quad_color(vec2_create(xoffset + width/2, yoffset + input_box_height/2),
-                             vec2_create(width, input_box_height),
-                             0.0f, is_input_focused ? COLOR_LIME_GREEN : COLOR_BLACK, 0.6f);
+    renderer_draw_quad_color(input_box_position, input_box_size, 0.0f, COLOR_BLACK, 0.6f);
+
+    if (is_input_focused) {
+        // Draw border around input box
+        renderer_draw_rect(input_box_position, input_box_size, COLOR_GOLDEN_YELLOW, 1.0f);
+    }
 
     if (input_count > 0) {
         // Draw characters from input buffer on the input box

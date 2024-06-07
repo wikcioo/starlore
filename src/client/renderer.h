@@ -37,6 +37,11 @@ void renderer_draw_quad_sprite_uv(vec2 position, vec2 size, f32 rotation_angle, 
 void renderer_draw_quad_sprite_color(vec2 position, vec2 size, f32 rotation_angle, vec3 color, f32 alpha, texture_t *texture);
 void renderer_draw_quad_sprite_color_uv(vec2 position, vec2 size, f32 rotation_angle, vec3 color, f32 alpha, texture_t *texture, const vec2 uv[4]);
 
+void renderer_draw_rect(vec2 position, vec2 size, vec3 color, f32 alpha);
+
+void renderer_draw_line(vec2 p1, vec2 p2, vec3 color, f32 alpha);
+void renderer_set_line_width(f32 width);
+
 void renderer_draw_text(const char *text, font_atlas_size_e fa_size, vec2 position, f32 scale, vec3 color, f32 alpha);
 
 u32 renderer_get_font_bearing_y(font_atlas_size_e fa);
