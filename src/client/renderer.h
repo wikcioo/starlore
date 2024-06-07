@@ -39,6 +39,10 @@ void renderer_draw_quad_sprite_color_uv(vec2 position, vec2 size, f32 rotation_a
 
 void renderer_draw_rect(vec2 position, vec2 size, vec3 color, f32 alpha);
 
+void renderer_draw_circle(vec2 position, f32 radius, vec3 color, f32 alpha);
+void renderer_draw_circle_thick(vec2 position, f32 radius, f32 thickness, vec3 color, f32 alpha);
+void renderer_draw_circle_thick_and_fade(vec2 position, f32 radius, f32 thickness, f32 fade, vec3 color, f32 alpha);
+
 void renderer_draw_line(vec2 p1, vec2 p2, vec3 color, f32 alpha);
 void renderer_set_line_width(f32 width);
 
