@@ -67,6 +67,10 @@ static vec2 mouse_position;
 static b8 game_world_initialized = false;
 static game_world_t game_world;
 
+// Renderer stats are displayed on the UI, which means that in order to display
+// all the information (including UI renderer calls) it needs to show previous frame's stats
+static renderer_stats_t prev_frame_renderer_stats;
+
 // Data referenced from somewhere else
 char username[PLAYER_MAX_NAME_LENGTH];
 i32 client_socket;
@@ -576,13 +580,13 @@ static void display_build_version(void)
                        vec2_create(left + 3.0f, top - renderer_get_font_height(FA32)),
                        1.0f,
                        COLOR_MILK,
-                       0.6f);
+                       1.0f);
 }
 
 #if defined(DEBUG)
 static void display_debug_info(f64 delta_time)
 {
-    static const f32 alpha = 0.6f;
+    static const f32 alpha = 1.0f;
     u32 font_height = renderer_get_font_height(FA16);
     vec2 position = vec2_create(-main_window_size.x / 2.0f + 3.0f, main_window_size.y / 2.0f - 50);
 
@@ -657,7 +661,8 @@ static void display_debug_info(f64 delta_time)
 
     position.y -= font_height;
 
-    snprintf(buffer, sizeof(buffer), "renderer\n  quad count: %u\n  char count: %u\n  draw calls: %u", renderer_stats.quad_count, renderer_stats.char_count, renderer_stats.draw_calls);
+    snprintf(buffer, sizeof(buffer), "renderer\n  quad count: %u\n  char count: %u\n  draw calls: %u",
+             prev_frame_renderer_stats.quad_count, prev_frame_renderer_stats.char_count, prev_frame_renderer_stats.draw_calls);
     renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, alpha);
 }
 #endif
@@ -889,6 +894,8 @@ int main(int argc, char *argv[])
 #endif
 
         renderer_end_scene();
+
+        memcpy(&prev_frame_renderer_stats, &renderer_stats, sizeof(renderer_stats));
 
         window_poll_events();
         window_swap_buffers();
