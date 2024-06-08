@@ -28,8 +28,6 @@ typedef struct {
 } game_object_t;
 
 typedef struct {
-    u32 width;
-    u32 height;
     u32 seed;
     i32 octave_count;
     f32 bias;

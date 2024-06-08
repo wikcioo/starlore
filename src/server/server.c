@@ -1050,13 +1050,12 @@ int main(int argc, char *argv[])
     messages = darray_create(sizeof(message_t));
 
     // Initialize game world
-    game_world.map.width = 64;
-    game_world.map.height = 64;
     game_world.map.seed = math_random();
-    game_world.map.octave_count = 3;
-    game_world.map.bias = 0.5f;
+    game_world.map.octave_count = 2;
+    game_world.map.bias = 2.0f;
     game_world.objects = darray_create(sizeof(game_object_t));
 
+#if 0
     f32 *perlin_noise_data = malloc(game_world.map.width * game_world.map.height * sizeof(f32));
 
     perlin_noise_config_t config = {
@@ -1094,6 +1093,7 @@ int main(int argc, char *argv[])
     }
 
     free(perlin_noise_data);
+#endif
 
     struct sigaction sa = {0};
     sa.sa_flags = SA_RESTART; // Restart functions interruptable by EINTR like poll()

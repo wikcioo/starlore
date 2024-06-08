@@ -44,11 +44,6 @@
 
 extern vec2 main_window_size;
 
-#if defined(DEBUG)
-static b8 show_perlin_noise_texture = false;
-extern texture_t perlin_noise_texture;
-#endif
-
 static u32 remote_player_count = 0;
 static player_remote_t remote_players[MAX_PLAYER_COUNT];
 static player_self_t self_player;
@@ -419,9 +414,7 @@ static void handle_socket_event(void)
                 received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_GAME_WORLD_INIT];
                 packet_game_world_init_t *game_world_init_packet = (packet_game_world_init_t *)(buffer + PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]);
 
-                LOG_TRACE("game world init packet received: width=%u, height=%u, seed=%u, octave_count=%i, bias=%.2f",
-                          game_world_init_packet->map.width,
-                          game_world_init_packet->map.height,
+                LOG_TRACE("game world init packet received: seed=%u, octave_count=%i, bias=%.2f",
                           game_world_init_packet->map.seed,
                           game_world_init_packet->map.octave_count,
                           game_world_init_packet->map.bias);
@@ -499,13 +492,6 @@ static b8 key_pressed_event_callback(event_code_e code, event_data_t data)
         }
         return true;
     }
-
-#if defined(DEBUG)
-    if (key == KEYCODE_M) {
-        show_perlin_noise_texture = !show_perlin_noise_texture;
-        return true;
-    }
-#endif
 
     return false;
 }
@@ -590,38 +576,22 @@ static void display_debug_info(f64 delta_time)
     u32 font_height = renderer_get_font_height(FA16);
     vec2 position = vec2_create(-main_window_size.x / 2.0f + 3.0f, main_window_size.y / 2.0f - 50);
 
+    {
+        // Draw background
+        u32 padding = 3;
+        u32 num_lines = 20;
+        u32 height = num_lines * font_height + padding*2;
+        u32 width_px = 200;
+        renderer_draw_quad_color(
+            vec2_create(
+                -main_window_size.x / 2.0f + width_px/2,
+                 main_window_size.y / 2.0f - 50 + (font_height * 0.75) - height/2 + padding
+            ),
+            vec2_create(width_px, height),
+            0.0f, COLOR_BLACK, 0.6f);
+    }
+
     char buffer[256] = {0};
-    snprintf(buffer, sizeof(buffer), "cursor captured: %s", window_is_cursor_captured() ? "true" : "false");
-    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, alpha);
-    memset(buffer, 0, sizeof(buffer));
-
-    position.y -= font_height;
-
-    snprintf(buffer, sizeof(buffer), "camera locked: %s", is_camera_locked_on_player ? "true" : "false");
-    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, alpha);
-    memset(buffer, 0, sizeof(buffer));
-
-    position.y -= font_height;
-
-    snprintf(buffer, sizeof(buffer), "camera position: x=%.2f y=%.2f", game_camera.position.x, game_camera.position.y);
-    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, alpha);
-    memset(buffer, 0, sizeof(buffer));
-
-    static u64 network_up = 0.0f;
-    static u64 network_down = 0.0f;
-    net_get_bandwidth(&network_up, &network_down);
-
-    position.y -= font_height;
-
-    snprintf(buffer, sizeof(buffer), "network up: %llu bytes/s", network_up);
-    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, alpha);
-    memset(buffer, 0, sizeof(buffer));
-
-    position.y -= font_height;
-
-    snprintf(buffer, sizeof(buffer), "network down: %llu bytes/s", network_down);
-    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, alpha);
-    memset(buffer, 0, sizeof(buffer));
 
     static f32 update_fps_period = 0.5f;
     static f32 update_fps_accumulator = 0.0f;
@@ -633,37 +603,82 @@ static void display_debug_info(f64 delta_time)
         update_fps_accumulator = 0.0f;
     }
 
-    position.y -= font_height;
-
     snprintf(buffer, sizeof(buffer), "fps: %d", (u32)(1.0f / dt));
     renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, alpha);
     memset(buffer, 0, sizeof(buffer));
 
     position.y -= font_height;
 
+    snprintf(buffer, sizeof(buffer), "cursor captured: %s", window_is_cursor_captured() ? "true" : "false");
+    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, alpha);
+    memset(buffer, 0, sizeof(buffer));
+
+    position.y -= font_height;
+
+    snprintf(buffer, sizeof(buffer), "camera\n  locked: %s\n  position\n    x: %.2f\n    y: %.2f",
+             is_camera_locked_on_player ? "true" : "false", game_camera.position.x, game_camera.position.y);
+    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, alpha);
+    memset(buffer, 0, sizeof(buffer));
+
+    static u64 network_up = 0.0f;
+    static u64 network_down = 0.0f;
+    net_get_bandwidth(&network_up, &network_down);
+
+    position.y -= 5 * font_height;
+
+    snprintf(buffer, sizeof(buffer), "network\n  up: %llu bytes/s\n  down: %llu bytes/s", network_up, network_down);
+    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, alpha);
+    memset(buffer, 0, sizeof(buffer));
+
+    position.y -= 3 * font_height;
+
+    char attack_buffer[32] = {0};
     if (self_player.base.attack_ready) {
-        snprintf(buffer, sizeof(buffer), "attack ready");
+        snprintf(attack_buffer, sizeof(attack_buffer), "ready");
     } else {
-        snprintf(buffer, sizeof(buffer), "attack cooldown: %0.2fs", PLAYER_ATTACK_COOLDOWN - self_player.base.attack_cooldown_accumulator);
+        snprintf(attack_buffer, sizeof(attack_buffer), "%0.2fs", PLAYER_ATTACK_COOLDOWN - self_player.base.attack_cooldown_accumulator);
     }
-    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, alpha);
-    memset(buffer, 0, sizeof(buffer));
 
-    position.y -= font_height;
-
+    char roll_buffer[32] = {0};
     if (self_player.base.roll_ready) {
-        snprintf(buffer, sizeof(buffer), "roll ready");
+        snprintf(roll_buffer, sizeof(roll_buffer), "ready");
     } else {
-        snprintf(buffer, sizeof(buffer), "roll cooldown: %0.2fs", PLAYER_ROLL_COOLDOWN - self_player.base.roll_cooldown_accumulator);
+        snprintf(roll_buffer, sizeof(roll_buffer), "%0.2fs", PLAYER_ROLL_COOLDOWN - self_player.base.roll_cooldown_accumulator);
     }
+
+    snprintf(buffer, sizeof(buffer), "cooldowns\n  attack: %s\n  roll: %s", attack_buffer, roll_buffer);
     renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, alpha);
     memset(buffer, 0, sizeof(buffer));
 
-    position.y -= font_height;
+    position.y -= 3 * font_height;
 
     snprintf(buffer, sizeof(buffer), "renderer\n  quad count: %u\n  char count: %u\n  draw calls: %u",
              prev_frame_renderer_stats.quad_count, prev_frame_renderer_stats.char_count, prev_frame_renderer_stats.draw_calls);
     renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, alpha);
+
+    if (game_world_initialized) {
+        position.y -= 4 * font_height;
+
+        u64 chunks_count = game_world_get_chunk_num();
+        u64 chunk_size = game_world_get_chunk_size();
+        f32 chunk_mem_usage = chunks_count * chunk_size;
+
+        char unit[4] = {0};
+        if (chunk_mem_usage >= GiB(1)) {
+            ASSERT_MSG(false, "unexpected amount of memory usage");
+        } else if (chunk_mem_usage >= MiB(1)) {
+            memcpy(unit, "MiB", 4);
+            chunk_mem_usage /= MiB(1);
+        } else if (chunk_mem_usage >= KiB(1)) {
+            memcpy(unit, "KiB", 4);
+            chunk_mem_usage /= KiB(1);
+        } else {
+            memcpy(unit, "B", 2);
+        }
+
+        snprintf(buffer, sizeof(buffer), "chunks in cache\n  count: %llu\n  mem usage: %.02f %s", chunks_count, chunk_mem_usage, unit);
+        renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, alpha);
+    }
 }
 #endif
 
@@ -795,6 +810,8 @@ int main(int argc, char *argv[])
     event_system_register(EVENT_CODE_KEY_PRESSED, player_key_pressed_event_callback);
     event_system_register(EVENT_CODE_KEY_RELEASED, player_key_released_event_callback);
 
+    event_system_register(EVENT_CODE_KEY_PRESSED, game_world_key_pressed_event_callback);
+
     event_system_register(EVENT_CODE_KEY_PRESSED, key_pressed_event_callback);
 
     event_system_register(EVENT_CODE_MOUSE_BUTTON_PRESSED, chat_mouse_button_pressed_event_callback);
@@ -834,9 +851,6 @@ int main(int argc, char *argv[])
             client_update_accumulator = 0.0f;
         }
 
-        // NOTE: temporary
-        game_world_process_player_position(&game_world, self_player.base.position);
-
         renderer_reset_stats();
         renderer_clear_screen(vec4_create(0.3f, 0.3f, 0.3f, 1.0f));
 
@@ -844,7 +858,7 @@ int main(int argc, char *argv[])
         renderer_begin_scene(&game_camera);
 
         if (game_world_initialized) {
-            game_world_render(&game_world);
+            game_world_render(&game_world, &game_camera);
         }
 
         // Render all other players
@@ -877,19 +891,6 @@ int main(int argc, char *argv[])
         renderer_draw_text(health_buffer, FA32, health_position, 1.0f, COLOR_MILK, 1.0f);
 
 #if defined(DEBUG)
-        if (game_world_initialized && show_perlin_noise_texture) {
-            f32 scale = 256.0f / perlin_noise_texture.width;
-            vec2 position = vec2_create(main_window_size.x / 2.0f - perlin_noise_texture.width / 2.0f * scale - 5.0f,
-                                        -main_window_size.y / 2.0f + perlin_noise_texture.height / 2.0f * scale + 5.0f);
-            vec2 size = vec2_create(256.0f, 256.0f);
-            renderer_draw_quad_sprite(position, size, 0.0f, &perlin_noise_texture);
-
-            static const char *desc = "height map";
-            position.x -= strlen(desc) * renderer_get_font_width(FA32) / 2.0f;
-            position.y += size.y / 2.0f + 5.0f;
-            renderer_draw_text(desc, FA32, position, 1.0f, COLOR_MILK, 1.0f);
-        }
-
         display_debug_info(delta_time);
 #endif
 
@@ -920,6 +921,8 @@ int main(int argc, char *argv[])
 
     event_system_unregister(EVENT_CODE_KEY_PRESSED, player_key_pressed_event_callback);
     event_system_unregister(EVENT_CODE_KEY_RELEASED, player_key_released_event_callback);
+
+    event_system_unregister(EVENT_CODE_KEY_PRESSED, game_world_key_pressed_event_callback);
 
     event_system_unregister(EVENT_CODE_KEY_PRESSED, key_pressed_event_callback);
 

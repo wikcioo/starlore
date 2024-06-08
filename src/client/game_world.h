@@ -10,6 +10,9 @@ void game_world_destroy(game_world_t *game_world);
 void game_world_load_resources(game_world_t *game_world);
 void game_world_add_objects(game_world_t *game_world, game_object_t *objects, u32 length);
 
-void game_world_render(game_world_t *game_world);
+void game_world_render(game_world_t *game_world, const camera_t *const camera);
 
-void game_world_process_player_position(game_world_t *game_world, vec2 position);
+u64 game_world_get_chunk_num(void);
+u64 game_world_get_chunk_size(void);
+
+b8 game_world_key_pressed_event_callback(event_code_e code, event_data_t data);

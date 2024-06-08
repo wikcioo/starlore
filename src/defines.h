@@ -46,3 +46,11 @@ STATIC_ASSERT(sizeof(f64) == 8, "f64 is not 8 bytes");
 
 STATIC_ASSERT(sizeof(b8)  == 1, "b8 is not 1 byte");
 STATIC_ASSERT(sizeof(b32) == 4, "b32 is not 4 bytes");
+
+#define GiB(n) ((n) * 1024ULL * 1024ULL * 1024ULL)
+#define MiB(n) ((n) * 1024ULL * 1024ULL)
+#define KiB(n) ((n) * 1024ULL)
+
+#define GB(n) ((n) * 1000ULL * 1000ULL * 1000ULL)
+#define MB(n) ((n) * 1000ULL * 1000ULL)
+#define KB(n) ((n) * 1000ULL)

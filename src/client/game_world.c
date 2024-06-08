@@ -1,34 +1,49 @@
 #include "game_world.h"
 
+#include <stdio.h>
 #include <memory.h>
 #include <stdlib.h>
 
 #include "config.h"
 #include "texture.h"
 #include "renderer.h"
+#include "color_palette.h"
 #include "common/logger.h"
 #include "common/asserts.h"
+#include "common/input_codes.h"
 #include "common/perlin_noise.h"
 #include "common/containers/darray.h"
 
+#define CHUNK_WIDTH_PX  (CHUNK_LENGTH * TILE_WIDTH_PX)
+#define CHUNK_HEIGHT_PX (CHUNK_LENGTH * TILE_HEIGHT_PX)
+#define CHUNK_NUM_TILES (CHUNK_LENGTH * CHUNK_LENGTH)
+
 typedef u8 tile_type_t;
 
-static i32 chunk_x = 0;
-static i32 chunk_y = 0;
-static tile_type_t *map_data;
+typedef struct {
+    i32 age;
+    i32 x, y;
+    tile_type_t tiles[CHUNK_NUM_TILES];
+#if defined(DEBUG)
+    texture_t perlin_noise_texture;
+#endif
+} chunk_t;
+
+static chunk_t *chunks;
 static texture_t terrain_spritesheet;
 static texture_t vegetation_spritesheet;
 
+#if defined(DEBUG)
+static b8 show_grid_coords = false;
+static b8 show_perlin_noise_textures = false;
+#endif
+
 extern vec2 main_window_size;
 
-#if defined(DEBUG)
-texture_t perlin_noise_texture;
-#endif
 vec2 terrain_tex_coord[TILE_TYPE_COUNT][TEX_COORD_COUNT];
 vec2 vegetation_tex_coord[GAME_OBJECT_TYPE_COUNT][TEX_COORD_COUNT];
 
 static void load_tex_coord(vec2 tex_coord[][TEX_COORD_COUNT], u32 type, f32 x, f32 y, f32 width, f32 height);
-static void reload_map_data(game_world_t *game_world);
 static void load_textures(void);
 
 void game_world_init(packet_game_world_init_t *packet, game_world_t *out_game_world)
@@ -42,33 +57,22 @@ void game_world_init(packet_game_world_init_t *packet, game_world_t *out_game_wo
 
 void game_world_destroy(game_world_t *game_world)
 {
-    darray_destroy(map_data);
+#if defined(DEBUG)
+    u64 chunks_length = darray_length(chunks);
+    for (u64 i = 0; i < chunks_length; i++) {
+        texture_destroy(&chunks[i].perlin_noise_texture);
+    }
+#endif
+
+    darray_destroy(chunks);
     darray_destroy(game_world->objects);
     texture_destroy(&terrain_spritesheet);
     texture_destroy(&vegetation_spritesheet);
-#if defined(DEBUG)
-    texture_destroy(&perlin_noise_texture);
-#endif
 }
 
 void game_world_load_resources(game_world_t *game_world)
 {
-    u32 map_width = game_world->map.width;
-    u32 map_height = game_world->map.height;
-
-    map_data = darray_reserve(map_width * map_height, sizeof(tile_type_t));
-
-#if defined(DEBUG)
-    texture_specification_t perlin_noise_texture_spec = {
-        .width = map_width,
-        .height = map_height,
-        .format = IMAGE_FORMAT_R8,
-        .generate_mipmaps = false
-    };
-    texture_create_from_spec(perlin_noise_texture_spec, NULL, &perlin_noise_texture, "perlin_noise");
-#endif
-
-    reload_map_data(game_world);
+    chunks = darray_create(sizeof(chunk_t));
     load_textures();
 }
 
@@ -83,37 +87,207 @@ void game_world_add_objects(game_world_t *game_world, game_object_t *objects, u3
     }
 }
 
-void game_world_render(game_world_t *game_world)
+static void game_world_render_chunk(chunk_t *chunk, i32 x, i32 y)
 {
-    ASSERT_MSG(map_data, "game_world_render called before map data loaded");
+#if defined(DEBUG)
+        if (show_perlin_noise_textures) {
+            vec2 position = vec2_create(x * CHUNK_WIDTH_PX, y * CHUNK_HEIGHT_PX);
+            static const vec2 size = {{ CHUNK_WIDTH_PX, CHUNK_HEIGHT_PX }};
+            renderer_draw_quad_sprite(position, size, 0.0f, &chunk->perlin_noise_texture);
+        } else {
+#endif
 
-    u32 map_width = game_world->map.width;
-    u32 map_height = game_world->map.height;
-
-    vec2 map_start = vec2_create(
-        -((game_world->map.width  / 2.0f) * TILE_WIDTH_PX ) + (TILE_WIDTH_PX  / 2.0f) + (chunk_x * TILE_WIDTH_PX ),
-        -((game_world->map.height / 2.0f) * TILE_HEIGHT_PX) + (TILE_HEIGHT_PX / 2.0f) + (chunk_y * TILE_HEIGHT_PX)
+    vec2 chunk_top_left_tile_pos = vec2_create(
+        (x * CHUNK_WIDTH_PX ) - (CHUNK_WIDTH_PX /2) + (TILE_WIDTH_PX /2),
+        (y * CHUNK_HEIGHT_PX) - (CHUNK_HEIGHT_PX/2) + (TILE_HEIGHT_PX/2)
     );
 
-    // Render tilemap
-    for (u32 row = 0; row < map_height; row++) {
-        for (u32 col = 0; col < map_width; col++) {
-            u32 idx = row * map_width + col;
-            tile_type_t tile_type = map_data[idx];
+    for (u32 j = 0; j < CHUNK_NUM_TILES; j++) {
+        u32 col = j % CHUNK_LENGTH;
+        u32 row = j / CHUNK_LENGTH;
+        tile_type_t tile_type = chunk->tiles[j];
 
-            vec2 position = vec2_create(
-                map_start.x + (col * TILE_WIDTH_PX),
-                map_start.y + (row * TILE_HEIGHT_PX)
-            );
+        vec2 position = vec2_create(
+            chunk_top_left_tile_pos.x + (col * TILE_WIDTH_PX),
+            chunk_top_left_tile_pos.y + (row * TILE_HEIGHT_PX)
+        );
 
-            vec2 size = vec2_create(TILE_WIDTH_PX, TILE_HEIGHT_PX);
+        static const vec2 size = {{ TILE_WIDTH_PX, TILE_HEIGHT_PX }};
 
-            vec2 tex_coord[4] = {0};
-            memcpy(tex_coord, &terrain_tex_coord[tile_type], sizeof(vec2) * TEX_COORD_COUNT);
+        vec2 tex_coord[4] = {0};
+        memcpy(tex_coord, &terrain_tex_coord[tile_type], sizeof(vec2) * TEX_COORD_COUNT);
 
-            renderer_draw_quad_sprite_uv(position, size, 0.0f, &terrain_spritesheet, tex_coord);
+        renderer_draw_quad_sprite_uv(position, size, 0.0f, &terrain_spritesheet, tex_coord);
+    }
+
+#if defined(DEBUG)
+        }
+#endif
+}
+
+static void game_world_load_chunk(game_world_t *game_world, i32 x, i32 y, chunk_t **out_chunk)
+{
+    f32 *perlin_noise_data = malloc(CHUNK_NUM_TILES * sizeof(f32));
+
+    perlin_noise_config_t config = {
+        .pos_x = x * CHUNK_LENGTH,
+        .pos_y = y * CHUNK_LENGTH,
+        .width = CHUNK_LENGTH,
+        .height = CHUNK_LENGTH,
+        .seed = game_world->map.seed,
+        .octave_count = game_world->map.octave_count,
+        .scaling_bias = game_world->map.bias
+    };
+
+    perlin_noise_generate_2d(config, perlin_noise_data);
+
+    chunk_t new_chunk = {0};
+    new_chunk.age = 0;
+    new_chunk.x = x;
+    new_chunk.y = y;
+
+    for (u32 i = 0; i < CHUNK_NUM_TILES; i++) {
+        tile_type_t tile_type = TILE_TYPE_NONE;
+        f32 value = perlin_noise_data[i];
+        if (value < 0.4f) {
+            tile_type = TILE_TYPE_WATER;
+        } else if (value < 0.45f) {
+            tile_type = TILE_TYPE_DIRT;
+        } else if (value < 0.8f) {
+            tile_type = TILE_TYPE_GRASS;
+        } else {
+            tile_type = TILE_TYPE_STONE;
+        }
+
+        ASSERT(tile_type > TILE_TYPE_NONE && tile_type < TILE_TYPE_COUNT);
+        new_chunk.tiles[i] = tile_type;
+    }
+
+#if defined(DEBUG)
+    u8 *perlin_noise_color = malloc(CHUNK_NUM_TILES * sizeof(u8));
+    for (u32 i = 0; i < CHUNK_NUM_TILES; i++) {
+        perlin_noise_color[i] = (u8)(perlin_noise_data[i] * 255.0f);
+    }
+
+    texture_specification_t perlin_noise_texture_spec = {
+        .width = CHUNK_LENGTH,
+        .height = CHUNK_LENGTH,
+        .format = IMAGE_FORMAT_R8,
+        .generate_mipmaps = false
+    };
+
+    char name[32] = {0};
+    snprintf(name, sizeof(name), "perlin_noise (%i:%i)", x, y);
+    texture_create_from_spec(perlin_noise_texture_spec, perlin_noise_color, &new_chunk.perlin_noise_texture, name);
+
+    free(perlin_noise_color);
+#endif
+
+    u64 chunks_length = darray_length(chunks);
+    if (chunks_length >= CHUNK_CACHE_MAX_ITEMS) {
+        // Crossed allowed cache size - start overriding the oldest chunks in cache
+        LOG_TRACE("reached chunk cache size limit of %u items", CHUNK_CACHE_MAX_ITEMS);
+        u64 oldest = 0;
+        u64 oldest_idx = 0;
+        for (u64 i = 0; i < chunks_length; i++) {
+            if (chunks[i].age > oldest) {
+                oldest_idx = i;
+                oldest = chunks[i].age;
+            }
+        }
+
+        chunk_t *oldest_chunk = &chunks[oldest_idx];
+        LOG_TRACE("overriding oldest chunk in cache at index %llu (age: %i, coords: %i:%i)",
+                  oldest_idx, oldest_chunk->age, oldest_chunk->x, oldest_chunk->y);
+
+#if defined(DEBUG)
+        texture_destroy(&oldest_chunk->perlin_noise_texture);
+#endif
+        memcpy(oldest_chunk, &new_chunk, sizeof(chunk_t));
+        *out_chunk = oldest_chunk;
+    } else {
+        // Append new chunk to cache
+        darray_push(chunks, new_chunk);
+        *out_chunk = &chunks[chunks_length-1];
+    }
+
+    free(perlin_noise_data);
+}
+
+void game_world_render(game_world_t *game_world, const camera_t *const camera)
+{
+    f32 cx = camera->position.x;
+    f32 cy = camera->position.y;
+    f32 ww = main_window_size.x;
+    f32 wh = main_window_size.y;
+
+    f32 lp = cx - ww/2;
+    f32 rp = cx + ww/2;
+    f32 tp = cy + wh/2;
+    f32 bp = cy - wh/2;
+    i32 left_coord   = (i32)((lp + (math_sign(lp) * CHUNK_WIDTH_PX/2))  / CHUNK_WIDTH_PX);
+    i32 right_coord  = (i32)((rp + (math_sign(rp) * CHUNK_WIDTH_PX/2))  / CHUNK_WIDTH_PX);
+    i32 top_coord    = (i32)((tp + (math_sign(tp) * CHUNK_HEIGHT_PX/2)) / CHUNK_HEIGHT_PX);
+    i32 bottom_coord = (i32)((bp + (math_sign(bp) * CHUNK_HEIGHT_PX/2)) / CHUNK_HEIGHT_PX);
+
+    for (i32 y = top_coord; y >= bottom_coord; y--) {
+        for (i32 x = left_coord; x <= right_coord; x++) {
+            // NOTE: Possible to optimize the lookup using a hashtable, if the cache gets large enough
+
+            // Check if x:y chunk exists
+            u64 chunks_length = darray_length(chunks);
+            chunk_t *chunk = NULL;
+            for (u64 i = 0; i < chunks_length; i++) {
+                chunk_t *c = &chunks[i];
+                if (c->x == x && c->y == y) {
+                    c->age = 0;
+                    chunk = c;
+                    break;
+                }
+            }
+
+            if (chunk == NULL) {
+                // Generate new chunk and insert it into array of chunks
+                game_world_load_chunk(game_world, x, y, &chunk);
+
+                // Increment age of chunks, which are not visible
+                chunks_length = darray_length(chunks);
+                for (u64 i = 0; i < chunks_length; i++) {
+                    chunk_t *c = &chunks[i];
+                    if (c->x < left_coord || c->x > right_coord || c->y > top_coord || c->y < bottom_coord) {
+                        c->age++;
+                    }
+                }
+            }
+
+            ASSERT(chunk != NULL);
+            game_world_render_chunk(chunk, x, y);
         }
     }
+
+#if defined(DEBUG)
+    if (show_grid_coords) {
+        u64 chunks_length = darray_length(chunks);
+        for (u64 i = 0; i < chunks_length; i++) {
+            chunk_t *chunk = &chunks[i];
+            i32 x = chunk->x;
+            i32 y = chunk->y;
+
+            vec2 pos = vec2_create(x * CHUNK_WIDTH_PX, y * CHUNK_HEIGHT_PX);
+            renderer_draw_quad_color(pos, vec2_create(CHUNK_WIDTH_PX, CHUNK_HEIGHT_PX), 0.0f, COLOR_BLACK, 0.3f);
+            renderer_draw_rect(pos, vec2_create(CHUNK_WIDTH_PX, CHUNK_HEIGHT_PX), COLOR_CRIMSON_RED, 1.0f);
+
+            f32 padding = 10.0f;
+            u32 font_height = renderer_get_font_height(FA64);
+            pos.x -= (CHUNK_WIDTH_PX/2 - padding);
+            pos.y += (CHUNK_HEIGHT_PX/2 - padding - font_height);
+
+            char buffer[256] = {0};
+            snprintf(buffer, sizeof(buffer), "cached chunk\nage: %i\ncoords: %i:%i", chunk->age, x, y);
+            renderer_draw_text(buffer, FA64, pos, 1.0f, COLOR_MILK, 1.0f);
+        }
+    }
+#endif
 
 #if 0
     // Render game objects
@@ -138,16 +312,30 @@ void game_world_render(game_world_t *game_world)
 #endif
 }
 
-void game_world_process_player_position(game_world_t *game_world, vec2 position)
+u64 game_world_get_chunk_num(void)
 {
-    i32 new_chunk_x = position.x / TILE_WIDTH_PX;
-    i32 new_chunk_y = position.y / TILE_HEIGHT_PX;
+    return darray_length(chunks);
+}
 
-    if (new_chunk_x != chunk_x || new_chunk_y != chunk_y) {
-        chunk_x = new_chunk_x;
-        chunk_y = new_chunk_y;
-        reload_map_data(game_world);
+u64 game_world_get_chunk_size(void)
+{
+    return sizeof(chunk_t);
+}
+
+b8 game_world_key_pressed_event_callback(event_code_e code, event_data_t data)
+{
+#if defined(DEBUG)
+    u16 key = data.u16[0];
+    if (key == KEYCODE_G) {
+        show_grid_coords = !show_grid_coords;
+        return true;
+    } else if (key == KEYCODE_P) {
+        show_perlin_noise_textures = !show_perlin_noise_textures;
+        return true;
     }
+#endif
+
+    return false;
 }
 
 static void load_tex_coord(vec2 tex_coord[][TEX_COORD_COUNT], u32 type, f32 x, f32 y, f32 width, f32 height)
@@ -156,60 +344,6 @@ static void load_tex_coord(vec2 tex_coord[][TEX_COORD_COUNT], u32 type, f32 x, f
     tex_coord[type][1] = vec2_create(x, y + height);
     tex_coord[type][2] = vec2_create(x + width, y + height);
     tex_coord[type][3] = vec2_create(x + width, y);
-}
-
-static void reload_map_data(game_world_t *game_world)
-{
-    u32 map_width = game_world->map.width;
-    u32 map_height = game_world->map.height;
-
-    f32 *perlin_noise_data = malloc(map_width * map_height * sizeof(f32));
-
-    perlin_noise_config_t config = {
-        .pos_x = chunk_x,
-        .pos_y = chunk_y,
-        .width = map_width,
-        .height = map_height,
-        .seed = game_world->map.seed,
-        .octave_count = game_world->map.octave_count,
-        .scaling_bias = game_world->map.bias
-    };
-
-    perlin_noise_generate_2d(config, perlin_noise_data);
-
-    for (u32 row = 0; row < map_height; row++) {
-        for (u32 col = 0; col < map_width; col++) {
-            u32 idx = row * map_width + col;
-
-            tile_type_t tile_type = TILE_TYPE_NONE;
-            f32 value = perlin_noise_data[idx];
-            if (value < 0.4f) {
-                tile_type = TILE_TYPE_WATER;
-            } else if (value < 0.45f) {
-                tile_type = TILE_TYPE_DIRT;
-            } else if (value < 0.8f) {
-                tile_type = TILE_TYPE_GRASS;
-            } else {
-                tile_type = TILE_TYPE_STONE;
-            }
-
-            ASSERT(tile_type > TILE_TYPE_NONE && tile_type < TILE_TYPE_COUNT);
-            map_data[idx] = tile_type;
-        }
-    }
-
-#if defined(DEBUG)
-    u8 *perlin_noise_color = malloc(map_width * map_height * sizeof(u8));
-    for (u32 i = 0; i < map_width * map_height; i++) {
-        perlin_noise_color[i] = (u8)(perlin_noise_data[i] * 255.0f);
-    }
-
-    texture_set_data(&perlin_noise_texture, perlin_noise_color);
-
-    free(perlin_noise_color);
-#endif
-
-    free(perlin_noise_data);
 }
 
 static void load_textures(void)
