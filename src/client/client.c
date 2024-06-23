@@ -756,6 +756,10 @@ void display_ui_test_panel(void)
     ui_radiobutton("opt_6", &selected_radio, 2, i++);
     ui_separator();
 
+    ui_text(">>slider");
+    static f32 slider_value = 0.5f;
+    ui_slider_float("label", &slider_value, -1.0f, 1.0f, i++);
+
     ui_text("the end");
 
     ui_end();

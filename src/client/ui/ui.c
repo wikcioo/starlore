@@ -1,5 +1,6 @@
 #include "ui.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include "input.h"
@@ -22,6 +23,10 @@
 #define RADIO_BUTTON_BORDER_COLOR           vec3_create(0.76f, 0.60f, 0.42f)
 #define RADIO_BUTTON_SELECTED_COLOR         vec3_create(0.60f, 0.80f, 0.20f)
 #define RADIO_BUTTON_HOVER_BACKGROUND_COLOR vec3_create(0.65f, 0.42f, 0.13f)
+#define SLIDER_BACKGROUND_COLOR             vec3_create(0.50f, 0.29f, 0.07f)
+#define SLIDER_BUTTON_COLOR                 vec3_create(0.60f, 0.80f, 0.20f)
+#define SLIDER_BUTTON_HOVER_COLOR           vec3_create(0.70f, 0.90f, 0.25f)
+#define SLIDER_BUTTON_ACTIVE_COLOR          vec3_create(0.80f, 0.95f, 0.04f)
 
 #define UI_INVALID_ID (-1)
 
@@ -52,6 +57,10 @@ typedef struct {
     f32 win_close_btn_scale;
     f32 separator_height;
     f32 separator_thickness;
+    f32 slider_height;
+    f32 slider_text_x_pad;
+    f32 slider_btn_width;
+    f32 slider_btn_y_pad;
 } ui_config_t;
 
 typedef struct {
@@ -62,6 +71,7 @@ typedef struct {
     b8   mouse_left_pressed_last_frame;
     b8   mouse_right_pressed;
     vec2 mouse_screen_pos;
+    vec2 mouse_screen_pos_last_frame;
 
     vec2 window_position; // top-left
     vec2 window_size;
@@ -117,6 +127,10 @@ void ui_init(void)
     ui.config.win_close_btn_scale = 0.8f;
     ui.config.separator_height    = 10.0f;
     ui.config.separator_thickness = 2.0f;
+    ui.config.slider_height       = 20.0f;
+    ui.config.slider_text_x_pad   = 5.0f;
+    ui.config.slider_btn_width    = 14.0f;
+    ui.config.slider_btn_y_pad    = 2.0f;
 }
 
 void ui_begin(const char *name, b8 *visible)
@@ -196,6 +210,7 @@ void ui_begin(const char *name, b8 *visible)
 void ui_end(void)
 {
     ui.mouse_left_pressed_last_frame = ui.mouse_left_pressed;
+    ui.mouse_screen_pos_last_frame = ui.mouse_screen_pos;
     renderer_end_scene();
 }
 
@@ -248,7 +263,7 @@ b8 ui_button(const char *text, ui_id id)
         }
     } else {
         if (rect_contains(btn_screen_pos, btn_size, ui.mouse_screen_pos)) {
-            if (ui.mouse_left_pressed) {
+            if (ui.mouse_left_pressed && ui.active_id == UI_INVALID_ID) {
                 ui.active_id = id;
             } else {
                 ui.hot_id = id;
@@ -318,7 +333,7 @@ void ui_checkbox(const char *text, b8 *is_checked, ui_id id)
         }
     } else {
         if (rect_contains(box_screen_pos, box_size, ui.mouse_screen_pos)) {
-            if (ui.mouse_left_pressed) {
+            if (ui.mouse_left_pressed && ui.active_id == UI_INVALID_ID) {
                 ui.active_id = id;
             } else {
                 ui.hot_id = id;
@@ -386,7 +401,7 @@ void ui_radiobutton(const char *text, i32 *selected_id, i32 self_id, ui_id id)
         }
     } else {
         if (rect_contains(btn_screen_pos, btn_size, ui.mouse_screen_pos)) {
-            if (ui.mouse_left_pressed) {
+            if (ui.mouse_left_pressed && ui.active_id == UI_INVALID_ID) {
                 ui.active_id = id;
             } else {
                 ui.hot_id = id;
@@ -419,6 +434,109 @@ void ui_radiobutton(const char *text, i32 *selected_id, i32 self_id, ui_id id)
     renderer_draw_circle(btn_render_pos, btn_size.x / 2.0f, btn_color, 1.0f);
     renderer_draw_circle_thick(btn_render_pos, btn_size.x / 2.0f, 0.2f, RADIO_BUTTON_BORDER_COLOR, 1.0f);
 
+    renderer_draw_text(text, ui.config.fa_size, text_render_pos, 1.0f, TEXT_COLOR, 1.0f);
+}
+
+void ui_slider_float(const char *text, f32 *value, f32 low, f32 high, ui_id id)
+{
+    u32 text_width = renderer_get_font_width(ui.config.fa_size) * strlen(text);
+    u32 text_bearing_y = renderer_get_font_bearing_y(ui.config.fa_size);
+
+    vec2 slider_pos = ui_layout_get_position();
+    vec2 slider_size = vec2_create(
+        ui.window_size.x - ui.config.win_inner_pad * 2.0f - text_width - ui.config.slider_text_x_pad,
+        ui.config.slider_height
+    );
+
+    vec2 widget_size = vec2_create(
+        slider_size.x + text_width + ui.config.slider_text_x_pad,
+        slider_size.y
+    );
+
+    ui_layout_add_widget(widget_size);
+
+    vec3 btn_color = SLIDER_BUTTON_COLOR;
+
+    vec2 btn_size = vec2_create(
+        ui.config.slider_btn_width,
+        slider_size.y - (ui.config.slider_btn_y_pad * 2.0f)
+    );
+    f32 t = (*value - low) / (high - low);
+    f32 btn_x_offset = t * (slider_size.x - btn_size.x) + (btn_size.x / 2.0f);
+    vec2 btn_pos = vec2_create(
+        slider_pos.x - btn_size.x / 2.0f + btn_x_offset,
+        slider_pos.y + ui.config.slider_btn_y_pad
+    );
+
+    vec2 btn_screen_pos = vec2_create(
+        ui.window_position.x + btn_pos.x,
+        ui.window_position.y + btn_pos.y
+    );
+
+    if (ui.active_id == id) {
+        if (!ui.mouse_left_pressed) {
+            ui.active_id = UI_INVALID_ID;
+        } else {
+            f32 dx = ui.mouse_screen_pos.x - ui.mouse_screen_pos_last_frame.x;
+            if (dx != 0.0f) {
+                f32 dt = dx / (slider_size.x - btn_size.x);
+                *value += dt * (high - low);
+                if (*value < low) {
+                    *value = low;
+                } else if (*value > high) {
+                    *value = high;
+                }
+            }
+        }
+    } else {
+        if (rect_contains(btn_screen_pos, btn_size, ui.mouse_screen_pos)) {
+            if (ui.mouse_left_pressed && ui.active_id == UI_INVALID_ID) {
+                ui.active_id = id;
+            } else {
+                ui.hot_id = id;
+            }
+        } else {
+            ui.hot_id = UI_INVALID_ID;
+        }
+    }
+
+    if (ui.active_id == id) {
+        btn_color = SLIDER_BUTTON_ACTIVE_COLOR;
+    } else if (ui.hot_id == id) {
+        btn_color = SLIDER_BUTTON_HOVER_COLOR;
+    }
+
+    vec2 win_render_pos = vec2_create(
+        ui.window_position.x - main_window_size.x / 2.0f,
+        main_window_size.y / 2.0f - ui.window_position.y
+    );
+
+    vec2 slider_render_pos = vec2_create(
+        win_render_pos.x + slider_pos.x + slider_size.x / 2.0f,
+        win_render_pos.y - slider_pos.y - slider_size.y / 2.0f
+    );
+
+    vec2 btn_render_pos = vec2_create(
+        slider_render_pos.x - slider_size.x / 2.0f + btn_x_offset,
+        slider_render_pos.y
+    );
+
+    vec2 text_render_pos = vec2_create(
+        slider_render_pos.x + slider_size.x / 2.0f + ui.config.slider_text_x_pad,
+        slider_render_pos.y - text_bearing_y / 2.0f
+    );
+
+    char value_buf[32] = {0};
+    snprintf(value_buf, sizeof(value_buf), "%.04f", *value);
+    u32 value_width = renderer_get_font_width(ui.config.fa_size) * strlen(value_buf);
+    vec2 value_render_pos = vec2_create(
+        math_round(slider_render_pos.x - value_width / 2.0f),
+        slider_render_pos.y - text_bearing_y / 2.0f
+    );
+
+    renderer_draw_quad_color(slider_render_pos, slider_size, 0.0f, SLIDER_BACKGROUND_COLOR, 1.0f);
+    renderer_draw_quad_color(btn_render_pos, btn_size, 0.0f, btn_color, 1.0f);
+    renderer_draw_text(value_buf, ui.config.fa_size, value_render_pos, 1.0f, TEXT_COLOR, 1.0f);
     renderer_draw_text(text, ui.config.fa_size, text_render_pos, 1.0f, TEXT_COLOR, 1.0f);
 }
 
@@ -499,6 +617,11 @@ b8 ui_mouse_button_released_event_callback(event_code_e code, event_data_t data)
         ui.window_resizing = false;
         ui.window_captured = false;
         ui.active_id = UI_INVALID_ID;
+        if (btn == MOUSEBUTTON_LEFT) {
+            ui.mouse_left_pressed = false;
+        } else if (btn == MOUSEBUTTON_RIGHT) {
+            ui.mouse_right_pressed = false;
+        }
     }
 
     return false;

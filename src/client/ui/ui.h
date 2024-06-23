@@ -12,6 +12,7 @@ void ui_text        (const char *text);
 b8   ui_button      (const char *text, ui_id id);
 void ui_checkbox    (const char *text, b8 *is_checked, ui_id id);
 void ui_radiobutton (const char *text, i32 *selected_id, i32 self_id, ui_id id);
+void ui_slider_float(const char *text, f32 *value, f32 low, f32 high, ui_id id);
 void ui_separator   (void);
 void ui_same_line   (void);
 
