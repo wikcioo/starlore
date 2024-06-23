@@ -14,6 +14,14 @@
 #define BUTTON_BACKGROUND_COLOR             vec3_create(0.50f, 0.29f, 0.07f)
 #define BUTTON_HOVER_COLOR                  vec3_create(0.65f, 0.42f, 0.13f)
 #define BUTTON_CLICK_COLOR                  vec3_create(0.79f, 0.52f, 0.17f)
+#define CHECKBOX_BACKGROUND_COLOR           vec3_create(0.50f, 0.29f, 0.07f)
+#define CHECKBOX_BORDER_COLOR               vec3_create(0.76f, 0.60f, 0.42f)
+#define CHECKBOX_CHECKED_COLOR              vec3_create(0.60f, 0.80f, 0.20f)
+#define CHECKBOX_HOVER_BACKGROUND_COLOR     vec3_create(0.65f, 0.42f, 0.13f)
+#define RADIO_BUTTON_BACKGROUND_COLOR       vec3_create(0.50f, 0.29f, 0.07f)
+#define RADIO_BUTTON_BORDER_COLOR           vec3_create(0.76f, 0.60f, 0.42f)
+#define RADIO_BUTTON_SELECTED_COLOR         vec3_create(0.60f, 0.80f, 0.20f)
+#define RADIO_BUTTON_HOVER_BACKGROUND_COLOR vec3_create(0.65f, 0.42f, 0.13f)
 
 #define UI_INVALID_ID (-1)
 
@@ -38,8 +46,12 @@ typedef struct {
     f32 win_title_y_pad;
     f32 widget_x_pad;
     f32 widget_y_pad;
+    f32 checkbox_x_pad;
+    f32 radiobutton_x_pad;
     f32 btn_pad;
     f32 win_close_btn_scale;
+    f32 separator_height;
+    f32 separator_thickness;
 } ui_config_t;
 
 typedef struct {
@@ -99,8 +111,12 @@ void ui_init(void)
     ui.config.win_title_y_pad     = 3.0f;
     ui.config.widget_x_pad        = 5.0f;
     ui.config.widget_y_pad        = 5.0f;
+    ui.config.checkbox_x_pad      = 5.0f;
+    ui.config.radiobutton_x_pad   = 5.0f;
     ui.config.btn_pad             = 3.0f;
     ui.config.win_close_btn_scale = 0.8f;
+    ui.config.separator_height    = 10.0f;
+    ui.config.separator_thickness = 2.0f;
 }
 
 void ui_begin(const char *name, b8 *visible)
@@ -169,6 +185,12 @@ void ui_begin(const char *name, b8 *visible)
         renderer_draw_line(tr, bl, TEXT_COLOR, 1.0f);
         renderer_draw_line(tl, br, TEXT_COLOR, 1.0f);
     }
+
+    // Make window header separator as high as its thickness, so that there is no extra margin
+    f32 old_height = ui.config.separator_height;
+    ui.config.separator_height = ui.config.separator_thickness;
+    ui_separator();
+    ui.config.separator_height = old_height;
 }
 
 void ui_end(void)
@@ -262,6 +284,171 @@ b8 ui_button(const char *text, ui_id id)
     renderer_draw_text(text, ui.config.fa_size, btn_text_render_pos, 1.0f, TEXT_COLOR, 1.0f);
 
     return clicked;
+}
+
+void ui_checkbox(const char *text, b8 *is_checked, ui_id id)
+{
+    u32 text_width = renderer_get_font_width(ui.config.fa_size) * strlen(text);
+    u32 text_height = renderer_get_font_height(ui.config.fa_size);
+    u32 text_bearing_y = renderer_get_font_bearing_y(ui.config.fa_size);
+
+    vec2 box_pos = ui_layout_get_position();
+    vec2 box_size = vec2_create(text_height, text_height);
+
+    vec2 widget_size = vec2_create(
+        box_size.x + text_width + ui.config.checkbox_x_pad,
+        box_size.y
+    );
+
+    ui_layout_add_widget(widget_size);
+
+    vec3 box_color = CHECKBOX_BACKGROUND_COLOR;
+
+    vec2 box_screen_pos = vec2_create(
+        ui.window_position.x + box_pos.x,
+        ui.window_position.y + box_pos.y
+    );
+
+    if (ui.active_id == id) {
+        if (!ui.mouse_left_pressed) {
+            ui.active_id = UI_INVALID_ID;
+            if (rect_contains(box_screen_pos, box_size, ui.mouse_screen_pos)) {
+                *is_checked = !(*is_checked);
+            }
+        }
+    } else {
+        if (rect_contains(box_screen_pos, box_size, ui.mouse_screen_pos)) {
+            if (ui.mouse_left_pressed) {
+                ui.active_id = id;
+            } else {
+                ui.hot_id = id;
+            }
+        } else {
+            ui.hot_id = UI_INVALID_ID;
+        }
+    }
+
+    if (*is_checked) {
+        box_color = CHECKBOX_CHECKED_COLOR;
+    } else if (ui.hot_id == id) {
+        box_color = CHECKBOX_HOVER_BACKGROUND_COLOR;
+    }
+
+    vec2 win_render_pos = vec2_create(
+        ui.window_position.x - main_window_size.x / 2.0f,
+        main_window_size.y / 2.0f - ui.window_position.y
+    );
+
+    vec2 box_render_pos = vec2_create(
+        win_render_pos.x + box_pos.x + box_size.x / 2.0f,
+        win_render_pos.y - box_pos.y - box_size.y / 2.0f
+    );
+
+    vec2 text_render_pos = vec2_create(
+        box_render_pos.x + box_size.x / 2.0f + ui.config.checkbox_x_pad,
+        box_render_pos.y - text_bearing_y / 2.0f
+    );
+    renderer_draw_quad_color(box_render_pos, box_size, 0.0f, box_color, 1.0f);
+    renderer_draw_rect(box_render_pos, box_size, CHECKBOX_BORDER_COLOR, 1.0f);
+
+    renderer_draw_text(text, ui.config.fa_size, text_render_pos, 1.0f, TEXT_COLOR, 1.0f);
+}
+
+void ui_radiobutton(const char *text, i32 *selected_id, i32 self_id, ui_id id)
+{
+    u32 text_width = renderer_get_font_width(ui.config.fa_size) * strlen(text);
+    u32 text_height = renderer_get_font_height(ui.config.fa_size);
+    u32 text_bearing_y = renderer_get_font_bearing_y(ui.config.fa_size);
+
+    vec2 btn_pos = ui_layout_get_position();
+    vec2 btn_size = vec2_create(text_height, text_height);
+
+    vec2 widget_size = vec2_create(
+        btn_size.x + text_width + ui.config.radiobutton_x_pad,
+        btn_size.y
+    );
+
+    ui_layout_add_widget(widget_size);
+
+    vec3 btn_color = RADIO_BUTTON_BACKGROUND_COLOR;
+
+    vec2 btn_screen_pos = vec2_create(
+        ui.window_position.x + btn_pos.x,
+        ui.window_position.y + btn_pos.y
+    );
+
+    if (ui.active_id == id) {
+        if (!ui.mouse_left_pressed) {
+            ui.active_id = UI_INVALID_ID;
+            if (rect_contains(btn_screen_pos, btn_size, ui.mouse_screen_pos)) {
+                *selected_id = self_id;
+            }
+        }
+    } else {
+        if (rect_contains(btn_screen_pos, btn_size, ui.mouse_screen_pos)) {
+            if (ui.mouse_left_pressed) {
+                ui.active_id = id;
+            } else {
+                ui.hot_id = id;
+            }
+        } else {
+            ui.hot_id = UI_INVALID_ID;
+        }
+    }
+
+    if (self_id == *selected_id) {
+        btn_color = RADIO_BUTTON_SELECTED_COLOR;
+    } else if (ui.hot_id == id) {
+        btn_color = RADIO_BUTTON_HOVER_BACKGROUND_COLOR;
+    }
+
+    vec2 win_render_pos = vec2_create(
+        ui.window_position.x - main_window_size.x / 2.0f,
+        main_window_size.y / 2.0f - ui.window_position.y
+    );
+
+    vec2 btn_render_pos = vec2_create(
+        win_render_pos.x + btn_pos.x + btn_size.x / 2.0f,
+        win_render_pos.y - btn_pos.y - btn_size.y / 2.0f
+    );
+
+    vec2 text_render_pos = vec2_create(
+        btn_render_pos.x + btn_size.x / 2.0f + ui.config.radiobutton_x_pad,
+        btn_render_pos.y - text_bearing_y / 2.0f
+    );
+    renderer_draw_circle(btn_render_pos, btn_size.x / 2.0f, btn_color, 1.0f);
+    renderer_draw_circle_thick(btn_render_pos, btn_size.x / 2.0f, 0.2f, RADIO_BUTTON_BORDER_COLOR, 1.0f);
+
+    renderer_draw_text(text, ui.config.fa_size, text_render_pos, 1.0f, TEXT_COLOR, 1.0f);
+}
+
+void ui_separator(void)
+{
+    ui.layout.in_line = false;
+    vec2 line_pos = ui_layout_get_position();
+    vec2 line_size = vec2_create(
+        ui.window_size.x - ui.config.win_inner_pad * 2.0f,
+        ui.config.separator_height
+    );
+
+    vec2 widget_size = vec2_create(
+        line_size.x + ui.config.win_inner_pad * 2.0f,
+        line_size.y
+    );
+
+    ui_layout_add_widget(widget_size);
+
+    vec2 win_render_pos = vec2_create(
+        ui.window_position.x - main_window_size.x / 2.0f,
+        main_window_size.y / 2.0f - ui.window_position.y
+    );
+
+    vec2 line_render_p1 = vec2_create(win_render_pos.x + line_pos.x,
+                                      win_render_pos.y - line_pos.y - line_size.y / 2.0f);
+    vec2 line_render_p2 = vec2_create(win_render_pos.x + line_pos.x + line_size.x,
+                                      win_render_pos.y - line_pos.y - line_size.y / 2.0f);
+
+    renderer_draw_line(line_render_p1, line_render_p2, TEXT_COLOR, 1.0f);
 }
 
 void ui_same_line(void)

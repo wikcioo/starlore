@@ -738,6 +738,24 @@ void display_ui_test_panel(void)
     ui_same_line();
     ui_text(buf);
 
+    ui_text(">>checkboxes");
+    static b8 checkboxes[3] = { false, false, false };
+    ui_checkbox("opt_1", &checkboxes[0], i++);
+    ui_same_line();
+    ui_checkbox("opt_2", &checkboxes[1], i++);
+    ui_same_line();
+    ui_checkbox("opt_3", &checkboxes[2], i++);
+    ui_separator();
+
+    ui_text(">>radio buttons");
+    static i32 selected_radio = 0;
+    ui_radiobutton("opt_4", &selected_radio, 0, i++);
+    ui_same_line();
+    ui_radiobutton("opt_5", &selected_radio, 1, i++);
+    ui_same_line();
+    ui_radiobutton("opt_6", &selected_radio, 2, i++);
+    ui_separator();
+
     ui_text("the end");
 
     ui_end();
