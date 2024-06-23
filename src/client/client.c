@@ -26,6 +26,7 @@
 #include "game_world.h"
 #include "camera.h"
 #include "color_palette.h"
+#include "ui/ui.h"
 #include "common/net.h"
 #include "common/clock.h"
 #include "common/asserts.h"
@@ -65,6 +66,10 @@ static game_world_t game_world;
 // Renderer stats are displayed on the UI, which means that in order to display
 // all the information (including UI renderer calls) it needs to show previous frame's stats
 static renderer_stats_t prev_frame_renderer_stats;
+
+#if defined(DEBUG)
+static b8 ui_test_panel_visible = false;
+#endif
 
 // Data referenced from somewhere else
 char username[PLAYER_MAX_NAME_LENGTH];
@@ -492,6 +497,12 @@ static b8 key_pressed_event_callback(event_code_e code, event_data_t data)
         }
         return true;
     }
+#if defined(DEBUG)
+    else if (key == KEYCODE_F1) {
+        ui_test_panel_visible = !ui_test_panel_visible;
+        return true;
+    }
+#endif
 
     return false;
 }
@@ -680,6 +691,57 @@ static void display_debug_info(f64 delta_time)
         renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, alpha);
     }
 }
+
+void display_ui_test_panel(void)
+{
+    ui_begin("ui test panel", &ui_test_panel_visible);
+
+    i32 i = 0;
+    for (; i < 3; i++) {
+        char buf[32] = {0};
+        snprintf(buf, sizeof(buf), "click %i", i);
+        if (ui_button(buf, i)) {
+            LOG_TRACE("clicked nr %i", i);
+        }
+    }
+
+    static b8 world_visible = false;
+    if (ui_button("toggle 'world'", i++)) {
+        world_visible = !world_visible;
+    }
+    ui_text("hello");
+    if (world_visible) {
+        ui_same_line();
+        ui_text(" world");
+        ui_same_line();
+        ui_text("!");
+        ui_text("this is below");
+    }
+    ui_text("noice");
+
+    static i32 counter = 0;
+    if (ui_button("+", i++)) {
+        counter++;
+    }
+    ui_same_line();
+    if (ui_button("-", i++)) {
+        counter--;
+    }
+    ui_same_line();
+    if (ui_button("r", i++)) {
+        counter = 0;
+    }
+
+    char buf[32] = {0};
+    snprintf(buf, sizeof(buf), "%i", counter);
+    ui_text("counter=");
+    ui_same_line();
+    ui_text(buf);
+
+    ui_text("the end");
+
+    ui_end();
+}
 #endif
 
 static void check_camera_movement(f64 delta_time)
@@ -724,7 +786,7 @@ int main(int argc, char *argv[])
 
     memcpy(username, argv[3], strlen(argv[3]));
 
-    if (!window_create(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT, "The Game")) {
+    if (!window_create(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT, "StarLore")) {
         LOG_ERROR("failed to create window");
         exit(EXIT_FAILURE);
     }
@@ -799,6 +861,7 @@ int main(int argc, char *argv[])
     camera_create(&ui_camera, vec2_zero());
     camera_create(&game_camera, vec2_zero());
 
+    ui_init();
     chat_init();
     player_load_animations();
 
@@ -813,6 +876,11 @@ int main(int argc, char *argv[])
     event_system_register(EVENT_CODE_KEY_PRESSED, game_world_key_pressed_event_callback);
 
     event_system_register(EVENT_CODE_KEY_PRESSED, key_pressed_event_callback);
+
+    event_system_register(EVENT_CODE_MOUSE_BUTTON_PRESSED, ui_mouse_button_pressed_event_callback);
+    event_system_register(EVENT_CODE_MOUSE_BUTTON_RELEASED, ui_mouse_button_released_event_callback);
+    event_system_register(EVENT_CODE_MOUSE_MOVED, ui_mouse_moved_event_callback);
+    event_system_register(EVENT_CODE_MOUSE_SCROLLED, ui_mouse_scrolled_event_callback);
 
     event_system_register(EVENT_CODE_MOUSE_BUTTON_PRESSED, chat_mouse_button_pressed_event_callback);
     event_system_register(EVENT_CODE_MOUSE_BUTTON_PRESSED, mouse_button_pressed_event_callback);
@@ -896,6 +964,12 @@ int main(int argc, char *argv[])
 
         renderer_end_scene();
 
+#if defined(DEBUG)
+        if (ui_test_panel_visible) {
+            display_ui_test_panel();
+        }
+#endif
+
         memcpy(&prev_frame_renderer_stats, &renderer_stats, sizeof(renderer_stats));
 
         window_poll_events();
@@ -925,6 +999,11 @@ int main(int argc, char *argv[])
     event_system_unregister(EVENT_CODE_KEY_PRESSED, game_world_key_pressed_event_callback);
 
     event_system_unregister(EVENT_CODE_KEY_PRESSED, key_pressed_event_callback);
+
+    event_system_unregister(EVENT_CODE_MOUSE_BUTTON_PRESSED, ui_mouse_button_pressed_event_callback);
+    event_system_unregister(EVENT_CODE_MOUSE_BUTTON_RELEASED, ui_mouse_button_released_event_callback);
+    event_system_unregister(EVENT_CODE_MOUSE_MOVED, ui_mouse_moved_event_callback);
+    event_system_unregister(EVENT_CODE_MOUSE_SCROLLED, ui_mouse_scrolled_event_callback);
 
     event_system_unregister(EVENT_CODE_MOUSE_BUTTON_PRESSED, chat_mouse_button_pressed_event_callback);
     event_system_unregister(EVENT_CODE_MOUSE_BUTTON_PRESSED, mouse_button_pressed_event_callback);

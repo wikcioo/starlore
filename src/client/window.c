@@ -42,6 +42,8 @@ static void glfw_mouse_button_callback(GLFWwindow* window, int button, int actio
 {
     if (action == INPUTACTION_Press) {
         event_system_fire(EVENT_CODE_MOUSE_BUTTON_PRESSED, (event_data_t){ .u8[0]=button });
+    } else if (action == INPUTACTION_Release) {
+        event_system_fire(EVENT_CODE_MOUSE_BUTTON_RELEASED, (event_data_t){ .u8[0]=button });
     }
 }
 

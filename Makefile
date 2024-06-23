@@ -14,6 +14,7 @@ VENDOR_DIR := src/vendor
 COMMON_DIR := src/common
 
 CLIENT_SOURCES := $(wildcard $(CLIENT_DIR)/*.c)
+CLIENT_SOURCES += $(wildcard $(CLIENT_DIR)/ui/*.c)
 CLIENT_SOURCES += $(wildcard $(VENDOR_DIR)/glad/src/*.c)
 SERVER_SOURCES := $(wildcard $(SERVER_DIR)/*.c)
 COMMON_SOURCES := $(wildcard $(COMMON_DIR)/*.c)
@@ -53,6 +54,9 @@ $(BUILD_DIR)/server/server: $(SERVER_OBJECTS) $(COMMON_OBJECTS)
 
 $(BUILD_DIR)/client/%.c.o: $(CLIENT_DIR)/%.c
 	$(CC) -c $(WARNINGS) $(CFLAGS) -I$(SRC_DIR) -I$(VENDOR_DIR)/glad/include -I$(VENDOR_DIR) -I/usr/include/freetype2 $^ -o $@
+
+$(BUILD_DIR)/client/%.c.o: $(CLIENT_DIR)/ui/%.c
+	$(CC) -c $(WARNINGS) $(CFLAGS) -I$(SRC_DIR) -I$(SRC_DIR)/client -I$(VENDOR_DIR)/glad/include -I$(VENDOR_DIR) -I/usr/include/freetype2 $^ -o $@
 
 $(BUILD_DIR)/client/%.c.o: $(VENDOR_DIR)/glad/src/%.c
 	$(CC) -c -I$(VENDOR_DIR)/glad/include $^ -o $@
