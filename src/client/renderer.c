@@ -467,7 +467,7 @@ void renderer_draw_circle_thick(vec2 position, f32 radius, f32 thickness, vec3 c
 void renderer_draw_circle_thick_and_fade(vec2 position, f32 radius, f32 thickness, f32 fade, vec3 color, f32 alpha)
 {
     mat4 translation_matrix = mat4_translate(position);
-    mat4 scale_matrix = mat4_scale(vec2_create(radius, radius));
+    mat4 scale_matrix = mat4_scale(vec2_create(radius * 2.0f, radius * 2.0f));
     mat4 model_matrix = mat4_multiply(translation_matrix, scale_matrix);
 
     vec4 c = vec4_create(color.r, color.g, color.b, alpha);

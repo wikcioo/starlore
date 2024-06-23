@@ -186,7 +186,6 @@ static void game_world_load_chunk(game_world_t *game_world, i32 x, i32 y, chunk_
     u64 chunks_length = darray_length(chunks);
     if (chunks_length >= CHUNK_CACHE_MAX_ITEMS) {
         // Crossed allowed cache size - start overriding the oldest chunks in cache
-        LOG_TRACE("reached chunk cache size limit of %u items", CHUNK_CACHE_MAX_ITEMS);
         u64 oldest = 0;
         u64 oldest_idx = 0;
         for (u64 i = 0; i < chunks_length; i++) {
@@ -197,8 +196,12 @@ static void game_world_load_chunk(game_world_t *game_world, i32 x, i32 y, chunk_
         }
 
         chunk_t *oldest_chunk = &chunks[oldest_idx];
+
+#if LOG_REACH_CHUNK_CACHE_SIZE_LIMIT
+        LOG_TRACE("reached chunk cache size limit of %u items", CHUNK_CACHE_MAX_ITEMS);
         LOG_TRACE("overriding oldest chunk in cache at index %llu (age: %i, coords: %i:%i)",
                   oldest_idx, oldest_chunk->age, oldest_chunk->x, oldest_chunk->y);
+#endif
 
 #if defined(DEBUG)
         texture_destroy(&oldest_chunk->perlin_noise_texture);

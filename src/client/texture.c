@@ -7,6 +7,7 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb/stb_image.h>
 
+#include "config.h"
 #include "common/logger.h"
 #include "common/asserts.h"
 #include "common/filesystem.h"
@@ -65,7 +66,9 @@ void texture_create_from_path(const char *filepath, texture_t *out_texture)
 
     stbi_image_free(image_data);
 
+#if LOG_TEXTURE_CREATE
     LOG_TRACE("created texture from path '%s' with id=%u", filepath, out_texture->id);
+#endif
 }
 
 void texture_create_from_spec(texture_specification_t spec, void *data, texture_t *out_texture, const char *debug_name)
@@ -91,7 +94,9 @@ void texture_create_from_spec(texture_specification_t spec, void *data, texture_
         glGenerateMipmap(GL_TEXTURE_2D);
     }
 
+#if LOG_TEXTURE_CREATE
     LOG_TRACE("created texture from spec '%s' with id=%u", debug_name, out_texture->id);
+#endif
 }
 
 void texture_set_data(texture_t *texture, void *data)
