@@ -6,6 +6,19 @@
 
 #include "asserts.h"
 
+u64 string_hash(const char *str)
+{
+    u64 hash = 0;
+
+    const char *p = str;
+    while (*p) {
+        hash = hash * 97 + (*p) * 17;
+        p++;
+    }
+
+    return hash;
+}
+
 void string_insert_char(char *str, u32 index, char c)
 {
     ASSERT(str);
