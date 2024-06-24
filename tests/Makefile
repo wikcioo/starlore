@@ -10,8 +10,7 @@ TEST_SOURCES := $(wildcard $(TESTS_DIR)/containers/*.c)
 TEST_OBJECTS := $(addprefix $(BUILD_DIR)/, $(addsuffix .c.o, $(basename $(notdir $(TEST_SOURCES)))))
 
 COMMON_SOURCES := $(COMMON_DIR)/logger.c
-COMMON_SOURCES += $(COMMON_DIR)/containers/darray.c
-COMMON_SOURCES += $(COMMON_DIR)/containers/ring_buffer.c
+COMMON_SOURCES += $(wildcard $(COMMON_DIR)/containers/*.c)
 COMMON_OBJECTS := $(addprefix $(BUILD_DIR)/, $(addsuffix .c.o, $(basename $(notdir $(COMMON_SOURCES)))))
 
 MANAGER_SOURCES := $(wildcard *.c)
