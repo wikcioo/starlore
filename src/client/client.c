@@ -686,17 +686,25 @@ void display_ui_test_panel(void)
 {
     ui_begin("ui test panel", &ui_test_panel_visible);
 
-    i32 i = 0;
-    for (; i < 3; i++) {
+    static b8 window_1_visible = false;
+    static b8 window_2_visible = false;
+    if (ui_button("show window_1")) {
+        window_1_visible = !window_1_visible;
+    }
+    if (ui_button("show window_2")) {
+        window_2_visible = !window_2_visible;
+    }
+
+    for (i32 i = 0; i < 3; i++) {
         char buf[32] = {0};
         snprintf(buf, sizeof(buf), "click %i", i);
-        if (ui_button(buf, i)) {
+        if (ui_button(buf)) {
             LOG_TRACE("clicked nr %i", i);
         }
     }
 
     static b8 world_visible = false;
-    if (ui_button("toggle 'world'", i++)) {
+    if (ui_button("toggle 'world'")) {
         world_visible = !world_visible;
     }
     ui_text("hello");
@@ -710,15 +718,15 @@ void display_ui_test_panel(void)
     ui_text("noice");
 
     static i32 counter = 0;
-    if (ui_button("+", i++)) {
+    if (ui_button("+")) {
         counter++;
     }
     ui_same_line();
-    if (ui_button("-", i++)) {
+    if (ui_button("-")) {
         counter--;
     }
     ui_same_line();
-    if (ui_button("r", i++)) {
+    if (ui_button("r")) {
         counter = 0;
     }
 
@@ -730,29 +738,40 @@ void display_ui_test_panel(void)
 
     ui_text(">>checkboxes");
     static b8 checkboxes[3] = { false, false, false };
-    ui_checkbox("opt_1", &checkboxes[0], i++);
+    ui_checkbox("opt_1", &checkboxes[0]);
     ui_same_line();
-    ui_checkbox("opt_2", &checkboxes[1], i++);
+    ui_checkbox("opt_2", &checkboxes[1]);
     ui_same_line();
-    ui_checkbox("opt_3", &checkboxes[2], i++);
+    ui_checkbox("opt_3", &checkboxes[2]);
     ui_separator();
 
     ui_text(">>radio buttons");
     static i32 selected_radio = 0;
-    ui_radiobutton("opt_4", &selected_radio, 0, i++);
+    ui_radiobutton("opt_4", &selected_radio, 0);
     ui_same_line();
-    ui_radiobutton("opt_5", &selected_radio, 1, i++);
+    ui_radiobutton("opt_5", &selected_radio, 1);
     ui_same_line();
-    ui_radiobutton("opt_6", &selected_radio, 2, i++);
+    ui_radiobutton("opt_6", &selected_radio, 2);
     ui_separator();
 
     ui_text(">>slider");
     static f32 slider_value = 0.5f;
-    ui_slider_float("label", &slider_value, -1.0f, 1.0f, i++);
+    ui_slider_float("label", &slider_value, -1.0f, 1.0f);
 
     ui_text("the end");
 
     ui_end();
+
+    if (window_1_visible) {
+        ui_begin("window_1", &window_1_visible);
+        ui_text("hello, world!");
+        ui_end();
+    }
+    if (window_2_visible) {
+        ui_begin("window_2", &window_2_visible);
+        ui_text("goodbye, world!");
+        ui_end();
+    }
 }
 #endif
 
@@ -977,9 +996,13 @@ int main(int argc, char *argv[])
         renderer_end_scene();
 
 #if defined(DEBUG)
+        ui_begin_frame();
+
         if (ui_test_panel_visible) {
             display_ui_test_panel();
         }
+
+        ui_end_frame();
 #endif
 
         memcpy(&prev_frame_renderer_stats, &renderer_stats, sizeof(renderer_stats));
@@ -1027,6 +1050,7 @@ int main(int argc, char *argv[])
     event_system_unregister(EVENT_CODE_WINDOW_RESIZED, chat_window_resized_event_callback);
     event_system_unregister(EVENT_CODE_GAME_WORLD_INIT, game_world_init_callback);
 
+    ui_shutdown();
     chat_shutdown();
     renderer_shutdown();
     event_system_shutdown();
