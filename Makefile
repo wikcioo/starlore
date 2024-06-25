@@ -19,6 +19,7 @@ CLIENT_SOURCES += $(wildcard $(VENDOR_DIR)/glad/src/*.c)
 SERVER_SOURCES := $(wildcard $(SERVER_DIR)/*.c)
 COMMON_SOURCES := $(wildcard $(COMMON_DIR)/*.c)
 COMMON_SOURCES += $(wildcard $(COMMON_DIR)/containers/*.c)
+COMMON_SOURCES += $(wildcard $(COMMON_DIR)/memory/*.c)
 
 CLIENT_OBJECTS := $(addprefix $(BUILD_DIR)/client/, $(addsuffix .c.o, $(basename $(notdir $(CLIENT_SOURCES)))))
 SERVER_OBJECTS := $(addprefix $(BUILD_DIR)/server/, $(addsuffix .c.o, $(basename $(notdir $(SERVER_SOURCES)))))
@@ -68,6 +69,9 @@ $(BUILD_DIR)/common/%.c.o: $(COMMON_DIR)/%.c
 	$(CC) -c $(WARNINGS) $(CFLAGS) -I$(SRC_DIR) $^ -o $@
 
 $(BUILD_DIR)/common/%.c.o: $(COMMON_DIR)/containers/%.c
+	$(CC) -c $(WARNINGS) $(CFLAGS) -I$(SRC_DIR) $^ -o $@
+
+$(BUILD_DIR)/common/%.c.o: $(COMMON_DIR)/memory/%.c
 	$(CC) -c $(WARNINGS) $(CFLAGS) -I$(SRC_DIR) $^ -o $@
 
 clean:

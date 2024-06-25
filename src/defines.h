@@ -15,6 +15,8 @@
     #error "Only clang and gcc compilers are supported!"
 #endif
 
+typedef unsigned long int uptr;
+
 typedef unsigned char u8;
 typedef unsigned short u16;
 typedef unsigned int u32;

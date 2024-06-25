@@ -7,10 +7,12 @@ TESTS_DIR := src
 COMMON_DIR := ../src/common
 
 TEST_SOURCES := $(wildcard $(TESTS_DIR)/containers/*.c)
+TEST_SOURCES += $(wildcard $(TESTS_DIR)/memory/*.c)
 TEST_OBJECTS := $(addprefix $(BUILD_DIR)/, $(addsuffix .c.o, $(basename $(notdir $(TEST_SOURCES)))))
 
 COMMON_SOURCES := $(COMMON_DIR)/logger.c
 COMMON_SOURCES += $(wildcard $(COMMON_DIR)/containers/*.c)
+COMMON_SOURCES += $(wildcard $(COMMON_DIR)/memory/*.c)
 COMMON_OBJECTS := $(addprefix $(BUILD_DIR)/, $(addsuffix .c.o, $(basename $(notdir $(COMMON_SOURCES)))))
 
 MANAGER_SOURCES := $(wildcard *.c)
@@ -29,6 +31,9 @@ $(BUILD_DIR)/test_suite: $(TEST_OBJECTS) $(MANAGER_OBJECTS) $(COMMON_OBJECTS)
 $(BUILD_DIR)/%.c.o: $(TESTS_DIR)/containers/%.c
 	$(CC) -c $(WARNINGS) $(CFLAGS) -I../src $^ -o $@
 
+$(BUILD_DIR)/%.c.o: $(TESTS_DIR)/memory/%.c
+	$(CC) -c $(WARNINGS) $(CFLAGS) -I../src $^ -o $@
+
 $(BUILD_DIR)/%.c.o: ./%.c
 	$(CC) -c $(WARNINGS) $(CFLAGS) -I../src $^ -o $@
 
@@ -36,6 +41,9 @@ $(BUILD_DIR)/%.c.o: $(COMMON_DIR)/%.c
 	$(CC) -c $(WARNINGS) $(CFLAGS) -I../src $^ -o $@
 
 $(BUILD_DIR)/%.c.o: $(COMMON_DIR)/containers/%.c
+	$(CC) -c $(WARNINGS) $(CFLAGS) -I../src $^ -o $@
+
+$(BUILD_DIR)/%.c.o: $(COMMON_DIR)/memory/%.c
 	$(CC) -c $(WARNINGS) $(CFLAGS) -I../src $^ -o $@
 
 clean:

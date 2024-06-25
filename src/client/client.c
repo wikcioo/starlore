@@ -27,6 +27,7 @@
 #include "camera.h"
 #include "color_palette.h"
 #include "ui/ui.h"
+#include "common/util.h"
 #include "common/net.h"
 #include "common/clock.h"
 #include "common/asserts.h"
@@ -672,22 +673,11 @@ static void display_debug_info(f64 delta_time)
 
         u64 chunks_count = game_world_get_chunk_num();
         u64 chunk_size = game_world_get_chunk_size();
-        f32 chunk_mem_usage = chunks_count * chunk_size;
+        u64 chunk_mem_usage = chunks_count * chunk_size;
+        f32 chunk_mem_usage_formatted;
 
-        char unit[4] = {0};
-        if (chunk_mem_usage >= GiB(1)) {
-            ASSERT_MSG(false, "unexpected amount of memory usage");
-        } else if (chunk_mem_usage >= MiB(1)) {
-            memcpy(unit, "MiB", 4);
-            chunk_mem_usage /= MiB(1);
-        } else if (chunk_mem_usage >= KiB(1)) {
-            memcpy(unit, "KiB", 4);
-            chunk_mem_usage /= KiB(1);
-        } else {
-            memcpy(unit, "B", 2);
-        }
-
-        snprintf(buffer, sizeof(buffer), "chunks in cache\n  count: %llu\n  mem usage: %.02f %s", chunks_count, chunk_mem_usage, unit);
+        const char *unit = get_size_unit(chunk_mem_usage, &chunk_mem_usage_formatted);
+        snprintf(buffer, sizeof(buffer), "chunks in cache\n  count: %llu\n  mem usage: %.02f %s", chunks_count, chunk_mem_usage_formatted, unit);
         renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, alpha);
     }
 }

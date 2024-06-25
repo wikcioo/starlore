@@ -8,6 +8,12 @@
         return false;                                                                               \
     }
 
+#define expect_not_equal(actual, expected)                                                                  \
+    if (actual == expected) {                                                                               \
+        LOG_ERROR("expected %lld to not be equal to %lld in %s:%d", expected, actual, __FILE__, __LINE__);  \
+        return false;                                                                                       \
+    }
+
 #define expect_true(condition)                                                                      \
     if (!(condition)) {                                                                             \
         LOG_ERROR("expected condition %s to be true in %s:%d", #condition, __FILE__, __LINE__);     \
