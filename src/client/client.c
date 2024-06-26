@@ -69,6 +69,7 @@ static game_world_t game_world;
 static renderer_stats_t prev_frame_renderer_stats;
 
 #if defined(DEBUG)
+static b8 ui_debug_info_visible = true;
 static b8 ui_test_panel_visible = false;
 #endif
 
@@ -500,6 +501,9 @@ static b8 key_pressed_event_callback(event_code_e code, event_data_t data)
     }
 #if defined(DEBUG)
     else if (key == KEYCODE_F1) {
+        ui_debug_info_visible = !ui_debug_info_visible;
+        return true;
+    } else if (key == KEYCODE_F2) {
         ui_test_panel_visible = !ui_test_panel_visible;
         return true;
     }
@@ -584,24 +588,13 @@ static void display_build_version(void)
 #if defined(DEBUG)
 static void display_debug_info(f64 delta_time)
 {
-    static const f32 alpha = 1.0f;
-    u32 font_height = renderer_get_font_height(FA16);
-    vec2 position = vec2_create(-main_window_size.x / 2.0f + 3.0f, main_window_size.y / 2.0f - 50);
+    static ui_window_config_t debug_info_window_conf = {
+        .position  = (vec2){ .x =   5, .y =  30 },
+        .size      = (vec2){ .x = 200, .y = 235 },
+        .font_size = FA16,
+    };
 
-    {
-        // Draw background
-        u32 padding = 3;
-        u32 num_lines = 20;
-        u32 height = num_lines * font_height + padding*2;
-        u32 width_px = 200;
-        renderer_draw_quad_color(
-            vec2_create(
-                -main_window_size.x / 2.0f + width_px/2,
-                 main_window_size.y / 2.0f - 50 + (font_height * 0.75) - height/2 + padding
-            ),
-            vec2_create(width_px, height),
-            0.0f, COLOR_BLACK, 0.6f);
-    }
+    ui_begin_conf("debug info", &debug_info_window_conf, &ui_debug_info_visible);
 
     char buffer[256] = {0};
 
@@ -616,33 +609,21 @@ static void display_debug_info(f64 delta_time)
     }
 
     snprintf(buffer, sizeof(buffer), "fps: %d", (u32)(1.0f / dt));
-    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, alpha);
-    memset(buffer, 0, sizeof(buffer));
-
-    position.y -= font_height;
+    ui_text(buffer);
 
     snprintf(buffer, sizeof(buffer), "cursor captured: %s", window_is_cursor_captured() ? "true" : "false");
-    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, alpha);
-    memset(buffer, 0, sizeof(buffer));
-
-    position.y -= font_height;
+    ui_text(buffer);
 
     snprintf(buffer, sizeof(buffer), "camera\n  locked: %s\n  position\n    x: %.2f\n    y: %.2f",
              is_camera_locked_on_player ? "true" : "false", game_camera.position.x, game_camera.position.y);
-    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, alpha);
-    memset(buffer, 0, sizeof(buffer));
+    ui_text(buffer);
 
     static u64 network_up = 0.0f;
     static u64 network_down = 0.0f;
     net_get_bandwidth(&network_up, &network_down);
 
-    position.y -= 5 * font_height;
-
     snprintf(buffer, sizeof(buffer), "network\n  up: %llu bytes/s\n  down: %llu bytes/s", network_up, network_down);
-    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, alpha);
-    memset(buffer, 0, sizeof(buffer));
-
-    position.y -= 3 * font_height;
+    ui_text(buffer);
 
     char attack_buffer[32] = {0};
     if (self_player.base.attack_ready) {
@@ -659,18 +640,13 @@ static void display_debug_info(f64 delta_time)
     }
 
     snprintf(buffer, sizeof(buffer), "cooldowns\n  attack: %s\n  roll: %s", attack_buffer, roll_buffer);
-    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, alpha);
-    memset(buffer, 0, sizeof(buffer));
-
-    position.y -= 3 * font_height;
+    ui_text(buffer);
 
     snprintf(buffer, sizeof(buffer), "renderer\n  quad count: %u\n  char count: %u\n  draw calls: %u",
              prev_frame_renderer_stats.quad_count, prev_frame_renderer_stats.char_count, prev_frame_renderer_stats.draw_calls);
-    renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, alpha);
+    ui_text(buffer);
 
     if (game_world_initialized) {
-        position.y -= 4 * font_height;
-
         u64 chunks_count = game_world_get_chunk_num();
         u64 chunk_size = game_world_get_chunk_size();
         u64 chunk_mem_usage = chunks_count * chunk_size;
@@ -678,8 +654,10 @@ static void display_debug_info(f64 delta_time)
 
         const char *unit = get_size_unit(chunk_mem_usage, &chunk_mem_usage_formatted);
         snprintf(buffer, sizeof(buffer), "chunks in cache\n  count: %llu\n  mem usage: %.02f %s", chunks_count, chunk_mem_usage_formatted, unit);
-        renderer_draw_text(buffer, FA16, position, 1.0f, COLOR_MILK, alpha);
+        ui_text(buffer);
     }
+
+    ui_end();
 }
 
 void display_ui_test_panel(void)
@@ -989,15 +967,14 @@ int main(int argc, char *argv[])
         );
         renderer_draw_text(health_buffer, FA32, health_position, 1.0f, COLOR_MILK, 1.0f);
 
-#if defined(DEBUG)
-        display_debug_info(delta_time);
-#endif
-
         renderer_end_scene();
 
 #if defined(DEBUG)
         ui_begin_frame();
 
+        if (ui_debug_info_visible) {
+            display_debug_info(delta_time);
+        }
         if (ui_test_panel_visible) {
             display_ui_test_panel();
         }

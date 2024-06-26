@@ -2,6 +2,13 @@
 
 #include "defines.h"
 #include "event.h"
+#include "renderer.h"
+
+typedef struct {
+    vec2 position;
+    vec2 size; // TODO: Implement window dynamic size
+    font_atlas_size_e font_size;
+} ui_window_config_t;
 
 void ui_init         (void);
 void ui_shutdown     (void);
@@ -9,6 +16,7 @@ void ui_shutdown     (void);
 void ui_begin_frame  (void);
 void ui_end_frame    (void);
 void ui_begin        (const char *name, b8 *visible);
+void ui_begin_conf   (const char *name, ui_window_config_t *config, b8 *visible);
 void ui_end          (void);
 
 void ui_text         (const char *text);

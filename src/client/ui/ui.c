@@ -4,7 +4,6 @@
 #include <string.h>
 
 #include "input.h"
-#include "renderer.h"
 #include "color_palette.h"
 #include "common/maths.h"
 #include "common/logger.h"
@@ -100,6 +99,8 @@ typedef struct {
 static ui_t ui;
 static stack_t id_stack;
 
+static font_atlas_size_e default_font_size = FA32;
+
 static vec2 ui_layout_get_position(ui_window_t *window)
 {
     if (!window->layout.in_line) {
@@ -144,7 +145,7 @@ void ui_init(void)
     ui.window_current_idx  = WINDOW_INVALID_IDX;
     ui.windows = darray_reserve(5, sizeof(ui_window_t));
 
-    ui.config.fa_size             = FA32;
+    ui.config.fa_size             = default_font_size;
     ui.config.win_inner_pad       = 3.0f;
     ui.config.win_title_y_pad     = 3.0f;
     ui.config.widget_x_pad        = 5.0f;
@@ -181,7 +182,19 @@ void ui_end_frame(void)
 
 void ui_begin(const char *name, b8 *visible)
 {
+    ui_window_config_t config = {
+        .position = { .x = 450.0f, .y = 100.0f },
+        .size     = { .x = 400.0f, .y = 500.0f },
+        .font_size = default_font_size
+    };
+    ui_begin_conf(name, &config, visible);
+}
+
+void ui_begin_conf(const char *name, ui_window_config_t *config, b8 *visible)
+{
     ASSERT_MSG(ui.window_current_idx == WINDOW_INVALID_IDX, "called ui_begin() while already in a ui_begin() block!");
+
+    ui.config.fa_size = config->font_size;
 
     b8  window_exists = false;
     u64 window_id     = SID(name);
@@ -200,8 +213,8 @@ void ui_begin(const char *name, b8 *visible)
         // TODO: Spawn new window in a non-fully overlapping position
         ui_window_t window = {
             .id       = window_id,
-            .position = { .x = 450.0f, .y = 100.0f },
-            .size     = { .x = 400.0f, .y = 500.0f }
+            .position = config->position,
+            .size     = config->size
         };
         window_idx = windows_count;
         darray_push(ui.windows, window);
@@ -295,6 +308,19 @@ void ui_end(void)
     renderer_end_scene();
 }
 
+static i32 get_num_lines(const char *text)
+{
+    i32 num_lines = 1;
+    const char *c = text;
+    while (*c) {
+        if (*c == '\n') {
+            num_lines++;
+        }
+        c++;
+    }
+    return num_lines;
+}
+
 void ui_text(const char *text)
 {
     ui_window_t *win = &ui.windows[ui.window_current_idx];
@@ -305,7 +331,7 @@ void ui_text(const char *text)
 
     vec2 text_pos = ui_layout_get_position(win);
 
-    vec2 text_size = vec2_create(text_width, text_height);
+    vec2 text_size = vec2_create(text_width, text_height * get_num_lines(text));
     ui_layout_add_widget(win, text_size);
 
     vec2 win_render_pos = vec2_create(
@@ -725,7 +751,6 @@ b8 ui_mouse_button_released_event_callback(event_code_e code, event_data_t data)
         } else {
             ui.window_resizing_idx = WINDOW_INVALID_IDX;
             ui.window_captured_idx = WINDOW_INVALID_IDX;
-            ui.active_id = UI_INVALID_ID;
             if (btn == MOUSEBUTTON_LEFT) {
                 ui.mouse_left_pressed = false;
             } else if (btn == MOUSEBUTTON_RIGHT) {

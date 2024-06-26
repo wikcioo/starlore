@@ -54,7 +54,7 @@ $(BUILD_DIR)/server/server: $(SERVER_OBJECTS) $(COMMON_OBJECTS)
 	$(CC) $^ -lm -o $@
 
 $(BUILD_DIR)/client/%.c.o: $(CLIENT_DIR)/%.c
-	$(CC) -c $(WARNINGS) $(CFLAGS) -I$(SRC_DIR) -I$(VENDOR_DIR)/glad/include -I$(VENDOR_DIR) -I/usr/include/freetype2 $^ -o $@
+	$(CC) -c $(WARNINGS) $(CFLAGS) -I$(SRC_DIR) -I$(SRC_DIR)/client -I$(VENDOR_DIR)/glad/include -I$(VENDOR_DIR) -I/usr/include/freetype2 $^ -o $@
 
 $(BUILD_DIR)/client/%.c.o: $(CLIENT_DIR)/ui/%.c
 	$(CC) -c $(WARNINGS) $(CFLAGS) -I$(SRC_DIR) -I$(SRC_DIR)/client -I$(VENDOR_DIR)/glad/include -I$(VENDOR_DIR) -I/usr/include/freetype2 $^ -o $@
