@@ -591,6 +591,8 @@ static void display_debug_info(f64 delta_time)
     static ui_window_config_t debug_info_window_conf = {
         .position  = (vec2){ .x =   5, .y =  30 },
         .size      = (vec2){ .x = 200, .y = 235 },
+        .draggable = true,
+        .resizable = false,
         .font_size = FA16,
     };
 

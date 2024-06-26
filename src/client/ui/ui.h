@@ -7,6 +7,8 @@
 typedef struct {
     vec2 position;
     vec2 size; // TODO: Implement window dynamic size
+    b8   draggable : 1;
+    b8   resizable : 1;
     font_atlas_size_e font_size;
 } ui_window_config_t;
 

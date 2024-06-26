@@ -73,7 +73,9 @@ typedef struct {
     ui_id id;
     vec2 position; // top-left
     vec2 size;
-    f32 alpha;
+    f32  alpha;
+    b8   draggable : 1;
+    b8   resizable : 1;
     ui_layout_t layout;
 } ui_window_t;
 
@@ -184,8 +186,10 @@ void ui_end_frame(void)
 void ui_begin(const char *name, b8 *visible)
 {
     ui_window_config_t config = {
-        .position = { .x = 450.0f, .y = 100.0f },
-        .size     = { .x = 400.0f, .y = 500.0f },
+        .position  = { .x = 450.0f, .y = 100.0f },
+        .size      = { .x = 400.0f, .y = 500.0f },
+        .draggable = true,
+        .resizable = true,
         .font_size = default_font_size
     };
     ui_begin_conf(name, &config, visible);
@@ -213,9 +217,11 @@ void ui_begin_conf(const char *name, ui_window_config_t *config, b8 *visible)
     if (!window_exists) {
         // TODO: Spawn new window in a non-fully overlapping position
         ui_window_t window = {
-            .id       = window_id,
-            .position = config->position,
-            .size     = config->size
+            .id        = window_id,
+            .position  = config->position,
+            .size      = config->size,
+            .draggable = config->draggable,
+            .resizable = config->resizable
         };
         window_idx = windows_count;
         darray_push(ui.windows, window);
@@ -790,17 +796,21 @@ b8 ui_mouse_moved_event_callback(event_code_e code, event_data_t data)
 
     if (ui.window_captured_idx != WINDOW_INVALID_IDX && ui.active_id == UI_INVALID_ID) {
         ui_window_t *win = &ui.windows[ui.window_captured_idx];
-        win->position.x += dx;
-        win->position.y += dy;
+        if (win->draggable) {
+            win->position.x += dx;
+            win->position.y += dy;
+        }
     } else if (ui.window_resizing_idx != WINDOW_INVALID_IDX) {
         ui_window_t *win = &ui.windows[ui.window_resizing_idx];
-        win->size.x += dx;
-        win->size.y += dy;
-        if (win->size.x <= MIN_WIN_WIDTH) {
-            win->size.x = MIN_WIN_WIDTH;
-        }
-        if (win->size.y <= MIN_WIN_HEIGHT) {
-            win->size.y = MIN_WIN_HEIGHT;
+        if (win->resizable) {
+            win->size.x += dx;
+            win->size.y += dy;
+            if (win->size.x <= MIN_WIN_WIDTH) {
+                win->size.x = MIN_WIN_WIDTH;
+            }
+            if (win->size.y <= MIN_WIN_HEIGHT) {
+                win->size.y = MIN_WIN_HEIGHT;
+            }
         }
     }
 
