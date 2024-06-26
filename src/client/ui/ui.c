@@ -73,6 +73,7 @@ typedef struct {
     ui_id id;
     vec2 position; // top-left
     vec2 size;
+    f32 alpha;
     ui_layout_t layout;
 } ui_window_t;
 
@@ -232,6 +233,9 @@ void ui_begin_conf(const char *name, ui_window_config_t *config, b8 *visible)
     win->layout.in_line  = false;
     win->layout.last_widget_size = vec2_zero();
 
+    static const f32 resizing_alpha = 0.4f;
+    win->alpha = 1.0f - (ui.window_resizing_idx == window_idx) * (1.0f - resizing_alpha);
+
     renderer_begin_scene(&ui_camera);
 
     // render window background
@@ -239,7 +243,7 @@ void ui_begin_conf(const char *name, ui_window_config_t *config, b8 *visible)
         (win->position.x - main_window_size.x / 2.0f) + win->size.x / 2.0f,
         (main_window_size.y / 2.0f - win->position.y) - win->size.y / 2.0f
     );
-    renderer_draw_quad_color(win_render_pos, win->size, 0.0f, BACKGROUND_COLOR, 1.0f);
+    renderer_draw_quad_color(win_render_pos, win->size, 0.0f, BACKGROUND_COLOR, win->alpha);
 
     // render border if focused
     if (window_idx == ui.window_focused_idx) {
@@ -254,7 +258,7 @@ void ui_begin_conf(const char *name, ui_window_config_t *config, b8 *visible)
             win_render_pos.x - win->size.x / 2.0f + win->layout.position.x,
             win_render_pos.y + win->size.y / 2.0f - text_bearing_y - win->layout.position.y
         );
-        renderer_draw_text(name, ui.config.fa_size, title_render_pos, 1.0f, TEXT_COLOR, 1.0f);
+        renderer_draw_text(name, ui.config.fa_size, title_render_pos, 1.0f, TEXT_COLOR, win->alpha);
 
         win->layout.position.y += text_height + ui.config.win_title_y_pad;
 
@@ -289,8 +293,8 @@ void ui_begin_conf(const char *name, ui_window_config_t *config, b8 *visible)
                               close_btn_render_pos.y - close_btn_size.y * 0.5f);
         vec2 tl = vec2_create(close_btn_render_pos.x - close_btn_size.x * 0.5f,
                               close_btn_render_pos.y + close_btn_size.y * 0.5f);
-        renderer_draw_line(tr, bl, TEXT_COLOR, 1.0f);
-        renderer_draw_line(tl, br, TEXT_COLOR, 1.0f);
+        renderer_draw_line(tr, bl, TEXT_COLOR, win->alpha);
+        renderer_draw_line(tl, br, TEXT_COLOR, win->alpha);
     }
 
     // Make window header separator as high as its thickness, so that there is no extra margin
@@ -298,6 +302,21 @@ void ui_begin_conf(const char *name, ui_window_config_t *config, b8 *visible)
     ui.config.separator_height = ui.config.separator_thickness;
     ui_separator();
     ui.config.separator_height = old_height;
+
+    // render window dimensions overlay when resizing
+    if (ui.window_resizing_idx == window_idx) {
+        renderer_draw_quad_color(win_render_pos, win->size, 0.0f, COLOR_BLACK, 0.8f);
+
+        char size_buf[32] = {0};
+        snprintf(size_buf, sizeof(size_buf), "%ix%i", (i32)win->size.x, (i32)win->size.y);
+        u32 size_text_width = renderer_get_font_width(ui.config.fa_size) * strlen(size_buf);
+        u32 size_text_bearing_y = renderer_get_font_bearing_y(ui.config.fa_size);
+        vec2 size_text_render_pos = vec2_create(
+            math_round(win_render_pos.x - size_text_width / 2.0f),
+            math_round(win_render_pos.y - size_text_bearing_y / 2.0f)
+        );
+        renderer_draw_text(size_buf, ui.config.fa_size, size_text_render_pos, 1.0f, TEXT_COLOR, 1.0f);
+    }
 }
 
 void ui_end(void)
@@ -343,7 +362,7 @@ void ui_text(const char *text)
         win_render_pos.x + text_pos.x,
         win_render_pos.y - text_pos.y - text_bearing_y
     );
-    renderer_draw_text(text, ui.config.fa_size, text_render_pos, 1.0f, TEXT_COLOR, 1.0f);
+    renderer_draw_text(text, ui.config.fa_size, text_render_pos, 1.0f, TEXT_COLOR, win->alpha);
 }
 
 b8 ui_button(const char *text)
@@ -401,14 +420,14 @@ b8 ui_button(const char *text)
         win_render_pos.x + btn_pos.x + btn_size.x / 2.0f,
         win_render_pos.y - btn_pos.y - btn_size.y / 2.0f
     );
-    renderer_draw_quad_color(btn_render_pos, btn_size, 0.0f, btn_color, 1.0f);
+    renderer_draw_quad_color(btn_render_pos, btn_size, 0.0f, btn_color, win->alpha);
 
     // render button text content
     vec2 btn_text_render_pos = vec2_create(
         btn_render_pos.x - text_width / 2.0f,
         btn_render_pos.y - text_bearing_y / 2.0f
     );
-    renderer_draw_text(text, ui.config.fa_size, btn_text_render_pos, 1.0f, TEXT_COLOR, 1.0f);
+    renderer_draw_text(text, ui.config.fa_size, btn_text_render_pos, 1.0f, TEXT_COLOR, win->alpha);
 
     return clicked;
 }
@@ -478,10 +497,10 @@ void ui_checkbox(const char *text, b8 *is_checked)
         box_render_pos.x + box_size.x / 2.0f + ui.config.checkbox_x_pad,
         box_render_pos.y - text_bearing_y / 2.0f
     );
-    renderer_draw_quad_color(box_render_pos, box_size, 0.0f, box_color, 1.0f);
-    renderer_draw_rect(box_render_pos, box_size, CHECKBOX_BORDER_COLOR, 1.0f);
+    renderer_draw_quad_color(box_render_pos, box_size, 0.0f, box_color, win->alpha);
+    renderer_draw_rect(box_render_pos, box_size, CHECKBOX_BORDER_COLOR, win->alpha);
 
-    renderer_draw_text(text, ui.config.fa_size, text_render_pos, 1.0f, TEXT_COLOR, 1.0f);
+    renderer_draw_text(text, ui.config.fa_size, text_render_pos, 1.0f, TEXT_COLOR, win->alpha);
 }
 
 void ui_radiobutton(const char *text, i32 *selected_id, i32 self_id)
@@ -549,10 +568,10 @@ void ui_radiobutton(const char *text, i32 *selected_id, i32 self_id)
         btn_render_pos.x + btn_size.x / 2.0f + ui.config.radiobutton_x_pad,
         btn_render_pos.y - text_bearing_y / 2.0f
     );
-    renderer_draw_circle(btn_render_pos, btn_size.x / 2.0f, btn_color, 1.0f);
-    renderer_draw_circle_thick(btn_render_pos, btn_size.x / 2.0f, 0.2f, RADIO_BUTTON_BORDER_COLOR, 1.0f);
+    renderer_draw_circle(btn_render_pos, btn_size.x / 2.0f, btn_color, win->alpha);
+    renderer_draw_circle_thick(btn_render_pos, btn_size.x / 2.0f, 0.2f, RADIO_BUTTON_BORDER_COLOR, win->alpha);
 
-    renderer_draw_text(text, ui.config.fa_size, text_render_pos, 1.0f, TEXT_COLOR, 1.0f);
+    renderer_draw_text(text, ui.config.fa_size, text_render_pos, 1.0f, TEXT_COLOR, win->alpha);
 }
 
 void ui_slider_float(const char *text, f32 *value, f32 low, f32 high)
@@ -656,10 +675,10 @@ void ui_slider_float(const char *text, f32 *value, f32 low, f32 high)
         math_round(slider_render_pos.y - text_bearing_y / 2.0f)
     );
 
-    renderer_draw_quad_color(slider_render_pos, slider_size, 0.0f, SLIDER_BACKGROUND_COLOR, 1.0f);
-    renderer_draw_quad_color(btn_render_pos, btn_size, 0.0f, btn_color, 1.0f);
-    renderer_draw_text(value_buf, ui.config.fa_size, value_render_pos, 1.0f, TEXT_COLOR, 1.0f);
-    renderer_draw_text(text, ui.config.fa_size, text_render_pos, 1.0f, TEXT_COLOR, 1.0f);
+    renderer_draw_quad_color(slider_render_pos, slider_size, 0.0f, SLIDER_BACKGROUND_COLOR, win->alpha);
+    renderer_draw_quad_color(btn_render_pos, btn_size, 0.0f, btn_color, win->alpha);
+    renderer_draw_text(value_buf, ui.config.fa_size, value_render_pos, 1.0f, TEXT_COLOR, win->alpha);
+    renderer_draw_text(text, ui.config.fa_size, text_render_pos, 1.0f, TEXT_COLOR, win->alpha);
 }
 
 void ui_separator(void)
@@ -690,7 +709,7 @@ void ui_separator(void)
     vec2 line_render_p2 = vec2_create(win_render_pos.x + line_pos.x + line_size.x,
                                       win_render_pos.y - line_pos.y - line_size.y / 2.0f);
 
-    renderer_draw_line(line_render_p1, line_render_p2, TEXT_COLOR, 1.0f);
+    renderer_draw_line(line_render_p1, line_render_p2, TEXT_COLOR, win->alpha);
 }
 
 void ui_same_line(void)
