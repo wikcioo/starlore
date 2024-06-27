@@ -722,7 +722,9 @@ void display_ui_test_panel(void)
     ui_same_line();
     ui_checkbox("opt_2", &checkboxes[1]);
     ui_same_line();
-    ui_checkbox("opt_3", &checkboxes[2]);
+    if (ui_checkbox("opt_3", &checkboxes[2])) {
+        LOG_TRACE("opt_3 state changed");
+    }
     ui_separator();
 
     ui_text(">>radio buttons");
@@ -731,7 +733,9 @@ void display_ui_test_panel(void)
     ui_same_line();
     ui_radiobutton("opt_5", &selected_radio, 1);
     ui_same_line();
-    ui_radiobutton("opt_6", &selected_radio, 2);
+    if (ui_radiobutton("opt_6", &selected_radio, 2)) {
+        LOG_TRACE("opt_6 state changed");
+    }
     ui_separator();
 
     ui_text(">>slider");

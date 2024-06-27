@@ -438,7 +438,7 @@ b8 ui_button(const char *text)
     return clicked;
 }
 
-void ui_checkbox(const char *text, b8 *is_checked)
+b8 ui_checkbox(const char *text, b8 *is_checked)
 {
     ui_id id = get_widget_id(text);
     ui_window_t *win = &ui.windows[ui.window_current_idx];
@@ -464,11 +464,13 @@ void ui_checkbox(const char *text, b8 *is_checked)
         win->position.y + box_pos.y
     );
 
+    b8 state_changed = false;
     if (ui.active_id == id) {
         if (!ui.mouse_left_pressed) {
             ui.active_id = UI_INVALID_ID;
             if (rect_contains(box_screen_pos, box_size, ui.mouse_screen_pos)) {
                 *is_checked = !(*is_checked);
+                state_changed = true;
             }
         }
     } else {
@@ -507,9 +509,11 @@ void ui_checkbox(const char *text, b8 *is_checked)
     renderer_draw_rect(box_render_pos, box_size, CHECKBOX_BORDER_COLOR, win->alpha);
 
     renderer_draw_text(text, ui.config.fa_size, text_render_pos, 1.0f, TEXT_COLOR, win->alpha);
+
+    return state_changed;
 }
 
-void ui_radiobutton(const char *text, i32 *selected_id, i32 self_id)
+b8 ui_radiobutton(const char *text, i32 *selected_id, i32 self_id)
 {
     ui_id id = get_widget_id(text);
     ui_window_t *win = &ui.windows[ui.window_current_idx];
@@ -535,10 +539,12 @@ void ui_radiobutton(const char *text, i32 *selected_id, i32 self_id)
         win->position.y + btn_pos.y
     );
 
+    b8 state_changed = false;
     if (ui.active_id == id) {
         if (!ui.mouse_left_pressed) {
             ui.active_id = UI_INVALID_ID;
             if (rect_contains(btn_screen_pos, btn_size, ui.mouse_screen_pos)) {
+                state_changed = *selected_id != self_id;
                 *selected_id = self_id;
             }
         }
@@ -578,6 +584,8 @@ void ui_radiobutton(const char *text, i32 *selected_id, i32 self_id)
     renderer_draw_circle_thick(btn_render_pos, btn_size.x / 2.0f, 0.2f, RADIO_BUTTON_BORDER_COLOR, win->alpha);
 
     renderer_draw_text(text, ui.config.fa_size, text_render_pos, 1.0f, TEXT_COLOR, win->alpha);
+
+    return state_changed;
 }
 
 void ui_slider_float(const char *text, f32 *value, f32 low, f32 high)
