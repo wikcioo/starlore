@@ -20,6 +20,12 @@ typedef struct {
     u32 draw_calls;
 } renderer_stats_t;
 
+typedef enum {
+    POLYGON_MODE_POINT = 0,
+    POLYGON_MODE_LINE  = 1,
+    POLYGON_MODE_FILL  = 2
+} polygon_mode_e;
+
 extern renderer_stats_t renderer_stats;
 
 b8 renderer_init(void);
@@ -51,3 +57,5 @@ void renderer_draw_text(const char *text, font_atlas_size_e fa_size, vec2 positi
 u32 renderer_get_font_bearing_y(font_atlas_size_e fa);
 u32 renderer_get_font_height(font_atlas_size_e fa);
 u32 renderer_get_font_width(font_atlas_size_e fa);
+
+void renderer_set_polygon_mode(polygon_mode_e mode);

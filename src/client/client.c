@@ -588,15 +588,17 @@ static void display_build_version(void)
 #if defined(DEBUG)
 static void display_debug_info(f64 delta_time)
 {
-    static ui_window_config_t debug_info_window_conf = {
+    static ui_window_config_t debug_window_conf = {
         .position  = (vec2){ .x =   5, .y =  30 },
-        .size      = (vec2){ .x = 200, .y = 235 },
+        .size      = (vec2){ .x = 200, .y = 300 },
         .draggable = true,
         .resizable = false,
         .font_size = FA16,
     };
 
-    ui_begin_conf("debug info", &debug_info_window_conf, &ui_debug_info_visible);
+    ui_begin_conf("debug window", &debug_window_conf, &ui_debug_info_visible);
+
+    ui_text("INFO");
 
     char buffer[256] = {0};
 
@@ -657,6 +659,13 @@ static void display_debug_info(f64 delta_time)
         const char *unit = get_size_unit(chunk_mem_usage, &chunk_mem_usage_formatted);
         snprintf(buffer, sizeof(buffer), "chunks in cache\n  count: %llu\n  mem usage: %.02f %s", chunks_count, chunk_mem_usage_formatted, unit);
         ui_text(buffer);
+    }
+
+    ui_separator();
+    ui_text("ACTIONS");
+    static b8 line_mode = false;
+    if (ui_checkbox("line mode", &line_mode)) {
+        renderer_set_polygon_mode(line_mode ? POLYGON_MODE_LINE : POLYGON_MODE_FILL);
     }
 
     ui_end();

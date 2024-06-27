@@ -580,6 +580,11 @@ u32 renderer_get_font_width(font_atlas_size_e fa)
     return renderer_data.font_atlases[fa].glyphs[32].advance.x;
 }
 
+void renderer_set_polygon_mode(polygon_mode_e mode)
+{
+    glPolygonMode(GL_FRONT_AND_BACK, (u16)GL_POINT + (u16)mode);
+}
+
 static void start_batch(void)
 {
     renderer_data.quad_index_count = 0;
