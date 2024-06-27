@@ -664,7 +664,15 @@ static void display_debug_info(f64 delta_time)
 
 void display_ui_test_panel(void)
 {
-    ui_begin("ui test panel", &ui_test_panel_visible);
+    static ui_window_config_t test_panel_window_conf = {
+        .position  = { .x = 450.0f, .y = 50.0f  },
+        .size      = { .x = 500.0f, .y = 600.0f },
+        .draggable = true,
+        .resizable = true,
+        .font_size = FA32,
+    };
+
+    ui_begin_conf("ui test panel", &test_panel_window_conf, &ui_test_panel_visible);
 
     static b8 window_1_visible = false;
     static b8 window_2_visible = false;
@@ -741,6 +749,12 @@ void display_ui_test_panel(void)
     ui_text(">>slider");
     static f32 slider_value = 0.5f;
     ui_slider_float("label", &slider_value, -1.0f, 1.0f);
+    ui_separator();
+
+    ui_text(">>option carousel");
+    static const char *carousel_options[] = { "binary", "hexadecimal", "octal", "decimal" };
+    static u32 selected_option = 0;
+    ui_opt_carousel("number representation", carousel_options, ARRAY_SIZE(carousel_options), &selected_option);
 
     ui_text("the end");
 

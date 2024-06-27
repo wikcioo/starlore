@@ -186,8 +186,8 @@ void ui_end_frame(void)
 void ui_begin(const char *name, b8 *visible)
 {
     ui_window_config_t config = {
-        .position  = { .x = 450.0f, .y = 100.0f },
-        .size      = { .x = 400.0f, .y = 500.0f },
+        .position  = { .x = 100.0f, .y = 100.0f },
+        .size      = { .x = MIN_WIN_WIDTH, .y = MIN_WIN_HEIGHT },
         .draggable = true,
         .resizable = true,
         .font_size = default_font_size
@@ -693,6 +693,62 @@ void ui_slider_float(const char *text, f32 *value, f32 low, f32 high)
     renderer_draw_quad_color(btn_render_pos, btn_size, 0.0f, btn_color, win->alpha);
     renderer_draw_text(value_buf, ui.config.fa_size, value_render_pos, 1.0f, TEXT_COLOR, win->alpha);
     renderer_draw_text(text, ui.config.fa_size, text_render_pos, 1.0f, TEXT_COLOR, win->alpha);
+}
+
+void ui_opt_carousel(const char *label, const char **items, u32 num_items, u32 *selected_item_index)
+{
+    ui_text(label);
+
+    if (ui_button("<")) {
+        *selected_item_index = ((*selected_item_index) + num_items - 1) % num_items;
+    }
+    ui_same_line();
+
+    {
+        ui_window_t *win = &ui.windows[ui.window_current_idx];
+
+        u32 widest_item_num_chars = 0;
+        for (u32 i = 0; i < num_items; i++) {
+            u32 num_chars = strlen(items[i]);
+            if (num_chars > widest_item_num_chars) {
+                widest_item_num_chars = num_chars;
+            }
+        }
+
+        u32 font_width = renderer_get_font_width(ui.config.fa_size);
+        u32 font_height = renderer_get_font_height(ui.config.fa_size);
+        u32 font_bearing_y = renderer_get_font_bearing_y(ui.config.fa_size);
+
+        const char *item = items[*selected_item_index];
+        u32 item_width = font_width * strlen(item);
+
+        f32 btn_height = font_height + ui.config.btn_pad * 2.0f;
+
+        vec2 item_pos = ui_layout_get_position(win);
+        vec2 widest_item_size = vec2_create(
+            widest_item_num_chars * font_width,
+            font_height
+        );
+
+        ui_layout_add_widget(win, widest_item_size);
+
+        vec2 win_render_pos = vec2_create(
+            win->position.x - main_window_size.x / 2.0f,
+            main_window_size.y / 2.0f - win->position.y
+        );
+
+        vec2 item_render_pos = vec2_create(
+            win_render_pos.x + item_pos.x + widest_item_size.x / 2.0f - item_width / 2.0f,
+            win_render_pos.y - item_pos.y - btn_height / 2.0f - font_bearing_y / 2.0f
+        );
+
+        renderer_draw_text(item, ui.config.fa_size, item_render_pos, 1.0f, TEXT_COLOR, win->alpha);
+    }
+
+    ui_same_line();
+    if (ui_button(">")) {
+        *selected_item_index = ((*selected_item_index) + 1) % num_items;
+    }
 }
 
 void ui_separator(void)

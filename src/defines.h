@@ -5,9 +5,10 @@
 
 #define INLINE static inline
 
-#define BIT(x) (1 << (x))
-#define UNUSED(x) (void)x
-#define STRINGIFY(x) #x
+#define BIT(x)          (1 << (x))
+#define UNUSED(x)       (void)x
+#define STRINGIFY(x)    #x
+#define ARRAY_SIZE(arr) (sizeof(arr)/sizeof(arr[0]))
 
 #if defined(__clang__) || defined(__GNUC__)
     #define STATIC_ASSERT _Static_assert
