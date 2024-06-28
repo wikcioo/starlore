@@ -94,6 +94,11 @@ INLINE f32 math_minf(f32 value_0, f32 value_1)
     return value_0 < value_1 ? value_0 : value_1;
 }
 
+INLINE f32 math_min(i32 value_0, i32 value_1)
+{
+    return math_minf((f32)value_0, (f32)value_1);
+}
+
 INLINE f32 math_maxf(f32 value_0, f32 value_1)
 {
     return value_0 > value_1 ? value_0 : value_1;
@@ -101,7 +106,7 @@ INLINE f32 math_maxf(f32 value_0, f32 value_1)
 
 INLINE i32 math_max(i32 value_0, i32 value_1)
 {
-    return math_maxf((i32)value_0, (i32)value_1);
+    return math_maxf((f32)value_0, (f32)value_1);
 }
 
 vec2 vec2_normalize(vec2 vector);

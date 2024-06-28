@@ -675,7 +675,7 @@ void display_ui_test_panel(void)
 {
     static ui_window_config_t test_panel_window_conf = {
         .position  = { .x = 450.0f, .y = 50.0f  },
-        .size      = { .x = 500.0f, .y = 600.0f },
+        .size      = { .x = 500.0f, .y = 700.0f },
         .draggable = true,
         .resizable = true,
         .font_size = FA32,
@@ -764,6 +764,17 @@ void display_ui_test_panel(void)
     static const char *carousel_options[] = { "binary", "hexadecimal", "octal", "decimal" };
     static u32 selected_option = 0;
     ui_opt_carousel("number representation", carousel_options, ARRAY_SIZE(carousel_options), &selected_option);
+
+    ui_separator();
+    ui_text(">>input box 1");
+    static char input_text1[32] = "foo";
+    if (ui_input_text("input_label_1", input_text1, ARRAY_SIZE(input_text1))) {
+        LOG_TRACE("input box content: %s", input_text1);
+    }
+
+    ui_text(">>input box 2");
+    static char input_text2[32] = "bar";
+    ui_input_text("input_label_2", input_text2, ARRAY_SIZE(input_text2));
 
     ui_text("the end");
 
@@ -904,8 +915,16 @@ int main(int argc, char *argv[])
     player_load_animations();
 
     // NOTE: order of registration is important
+    event_system_register(EVENT_CODE_MOUSE_BUTTON_PRESSED,  ui_mouse_button_pressed_event_callback);
+    event_system_register(EVENT_CODE_MOUSE_BUTTON_RELEASED, ui_mouse_button_released_event_callback);
+    event_system_register(EVENT_CODE_MOUSE_MOVED,           ui_mouse_moved_event_callback);
+    event_system_register(EVENT_CODE_MOUSE_SCROLLED,        ui_mouse_scrolled_event_callback);
+    event_system_register(EVENT_CODE_CHAR_PRESSED,          ui_char_pressed_event_callback);
+    event_system_register(EVENT_CODE_KEY_PRESSED,           ui_key_pressed_event_callback);
+    event_system_register(EVENT_CODE_KEY_REPEATED,          ui_key_repeated_event_callback);
+
     event_system_register(EVENT_CODE_CHAR_PRESSED, chat_char_pressed_event_callback);
-    event_system_register(EVENT_CODE_KEY_PRESSED, chat_key_pressed_event_callback);
+    event_system_register(EVENT_CODE_KEY_PRESSED,  chat_key_pressed_event_callback);
     event_system_register(EVENT_CODE_KEY_REPEATED, chat_key_repeated_event_callback);
 
     event_system_register(EVENT_CODE_KEY_PRESSED, player_key_pressed_event_callback);
@@ -914,11 +933,6 @@ int main(int argc, char *argv[])
     event_system_register(EVENT_CODE_KEY_PRESSED, game_world_key_pressed_event_callback);
 
     event_system_register(EVENT_CODE_KEY_PRESSED, key_pressed_event_callback);
-
-    event_system_register(EVENT_CODE_MOUSE_BUTTON_PRESSED, ui_mouse_button_pressed_event_callback);
-    event_system_register(EVENT_CODE_MOUSE_BUTTON_RELEASED, ui_mouse_button_released_event_callback);
-    event_system_register(EVENT_CODE_MOUSE_MOVED, ui_mouse_moved_event_callback);
-    event_system_register(EVENT_CODE_MOUSE_SCROLLED, ui_mouse_scrolled_event_callback);
 
     event_system_register(EVENT_CODE_MOUSE_BUTTON_PRESSED, chat_mouse_button_pressed_event_callback);
     event_system_register(EVENT_CODE_MOUSE_BUTTON_PRESSED, mouse_button_pressed_event_callback);
@@ -1030,6 +1044,14 @@ int main(int argc, char *argv[])
     LOG_INFO("removed self from players");
     player_self_destroy(&self_player);
 
+    event_system_unregister(EVENT_CODE_MOUSE_BUTTON_PRESSED,  ui_mouse_button_pressed_event_callback);
+    event_system_unregister(EVENT_CODE_MOUSE_BUTTON_RELEASED, ui_mouse_button_released_event_callback);
+    event_system_unregister(EVENT_CODE_MOUSE_MOVED,           ui_mouse_moved_event_callback);
+    event_system_unregister(EVENT_CODE_MOUSE_SCROLLED,        ui_mouse_scrolled_event_callback);
+    event_system_unregister(EVENT_CODE_CHAR_PRESSED,          ui_char_pressed_event_callback);
+    event_system_unregister(EVENT_CODE_KEY_PRESSED,           ui_key_pressed_event_callback);
+    event_system_unregister(EVENT_CODE_KEY_REPEATED,          ui_key_repeated_event_callback);
+
     event_system_unregister(EVENT_CODE_CHAR_PRESSED, chat_char_pressed_event_callback);
     event_system_unregister(EVENT_CODE_KEY_PRESSED, chat_key_pressed_event_callback);
     event_system_unregister(EVENT_CODE_KEY_REPEATED, chat_key_repeated_event_callback);
@@ -1040,11 +1062,6 @@ int main(int argc, char *argv[])
     event_system_unregister(EVENT_CODE_KEY_PRESSED, game_world_key_pressed_event_callback);
 
     event_system_unregister(EVENT_CODE_KEY_PRESSED, key_pressed_event_callback);
-
-    event_system_unregister(EVENT_CODE_MOUSE_BUTTON_PRESSED, ui_mouse_button_pressed_event_callback);
-    event_system_unregister(EVENT_CODE_MOUSE_BUTTON_RELEASED, ui_mouse_button_released_event_callback);
-    event_system_unregister(EVENT_CODE_MOUSE_MOVED, ui_mouse_moved_event_callback);
-    event_system_unregister(EVENT_CODE_MOUSE_SCROLLED, ui_mouse_scrolled_event_callback);
 
     event_system_unregister(EVENT_CODE_MOUSE_BUTTON_PRESSED, chat_mouse_button_pressed_event_callback);
     event_system_unregister(EVENT_CODE_MOUSE_BUTTON_PRESSED, mouse_button_pressed_event_callback);

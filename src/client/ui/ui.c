@@ -1,6 +1,7 @@
 #include "ui.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "input.h"
@@ -11,6 +12,9 @@
 #include "common/asserts.h"
 #include "common/containers/stack.h"
 #include "common/containers/darray.h"
+#include "common/containers/hashtable.h"
+#include "common/containers/ring_buffer.h"
+#include "common/memory/arena_allocator.h"
 
 // TODO: make configurable and create ui color pallete
 #define TEXT_COLOR                          vec3_create(0.93f, 0.89f, 0.75f)
@@ -31,12 +35,22 @@
 #define SLIDER_BUTTON_COLOR                 vec3_create(0.60f, 0.80f, 0.20f)
 #define SLIDER_BUTTON_HOVER_COLOR           vec3_create(0.70f, 0.90f, 0.25f)
 #define SLIDER_BUTTON_ACTIVE_COLOR          vec3_create(0.80f, 0.95f, 0.04f)
+#define INPUT_BOX_BACKGROUND_COLOR          vec3_create(0.50f, 0.29f, 0.07f)
+#define INPUT_BOX_HOVER_COLOR               vec3_create(0.65f, 0.42f, 0.13f)
+#define INPUT_BOX_BORDER_COLOR              vec3_create(0.76f, 0.60f, 0.42f)
+#define INPUT_BOX_CURSOR_COLOR              vec3_create(0.60f, 0.80f, 0.20f)
 
 #define UI_INVALID_ID       (0)
 #define WINDOW_INVALID_IDX  (-1)
 
+#define MAX_INPUT_BOX_COUNT             64
+#define INPUT_BUFFER_CAPACITY           32
+#define INPUT_BUFFER_MAX_PROCESSED_KEYS 8
+
 #define MIN_WIN_WIDTH  200
 #define MIN_WIN_HEIGHT 200
+
+#define FRAME_ALLOCATOR_SIZE KiB(1)
 
 // TODO: to be defined here
 extern camera_t ui_camera;
@@ -67,6 +81,11 @@ typedef struct {
     f32 slider_y_pad;
     f32 slider_text_x_pad;
     f32 slider_btn_y_pad;
+    f32 input_box_label_x_pad;
+    f32 input_box_text_x_pad;
+    f32 input_box_y_pad;
+    f32 input_box_cursor_width;
+    f32 input_box_cursor_y_pad;
 } ui_config_t;
 
 typedef struct {
@@ -80,12 +99,23 @@ typedef struct {
 } ui_window_t;
 
 typedef struct {
+    u32 text_offset;
+    u32 cursor_offset;
+    b8  content_flushed_last_frame;
+} input_box_state_t;
+
+typedef struct {
     ui_id hot_id;
     ui_id active_id;
 
-    b8   mouse_left_pressed;
-    b8   mouse_left_pressed_last_frame;
-    b8   mouse_right_pressed;
+    void *input_box_state_memory;
+    hashtable_t input_box_state;
+    b8   input_active                  : 1;
+    b8   input_has_space               : 1;
+
+    b8   mouse_left_pressed            : 1;
+    b8   mouse_left_pressed_last_frame : 1;
+    b8   mouse_right_pressed           : 1;
     vec2 mouse_screen_pos;
     vec2 mouse_screen_pos_last_frame;
 
@@ -101,8 +131,9 @@ typedef struct {
 
 static ui_t ui;
 static stack_t id_stack;
-
+static u32 *input_buffer;
 static font_atlas_size_e default_font_size = FA32;
+static arena_allocator_t frame_allocator;
 
 static vec2 ui_layout_get_position(ui_window_t *window)
 {
@@ -148,28 +179,45 @@ void ui_init(void)
     ui.window_current_idx  = WINDOW_INVALID_IDX;
     ui.windows = darray_reserve(5, sizeof(ui_window_t));
 
-    ui.config.fa_size             = default_font_size;
-    ui.config.win_inner_pad       = 3.0f;
-    ui.config.win_title_y_pad     = 3.0f;
-    ui.config.widget_x_pad        = 5.0f;
-    ui.config.widget_y_pad        = 5.0f;
-    ui.config.checkbox_x_pad      = 5.0f;
-    ui.config.radiobutton_x_pad   = 5.0f;
-    ui.config.btn_pad             = 3.0f;
-    ui.config.win_close_btn_scale = 0.8f;
-    ui.config.separator_height    = 10.0f;
-    ui.config.separator_thickness = 2.0f;
-    ui.config.slider_y_pad        = 2.0f;
-    ui.config.slider_text_x_pad   = 5.0f;
-    ui.config.slider_btn_y_pad    = 2.0f;
+    ui.config.fa_size                   = default_font_size;
+    ui.config.win_inner_pad             = 3.0f;
+    ui.config.win_title_y_pad           = 3.0f;
+    ui.config.widget_x_pad              = 5.0f;
+    ui.config.widget_y_pad              = 5.0f;
+    ui.config.checkbox_x_pad            = 5.0f;
+    ui.config.radiobutton_x_pad         = 5.0f;
+    ui.config.btn_pad                   = 3.0f;
+    ui.config.win_close_btn_scale       = 0.8f;
+    ui.config.separator_height          = 10.0f;
+    ui.config.separator_thickness       = 2.0f;
+    ui.config.slider_y_pad              = 2.0f;
+    ui.config.slider_text_x_pad         = 5.0f;
+    ui.config.slider_btn_y_pad          = 2.0f;
+    ui.config.input_box_label_x_pad     = 5.0f;
+    ui.config.input_box_text_x_pad      = 2.0f;
+    ui.config.input_box_y_pad           = 2.0f;
+    ui.config.input_box_cursor_width    = 2.0f;
+    ui.config.input_box_cursor_y_pad    = 3.0f;
 
     stack_create(sizeof(ui_id), &id_stack);
+    input_buffer = ring_buffer_reserve(INPUT_BUFFER_CAPACITY, sizeof(u32));
+
+    ui.input_box_state_memory = malloc(sizeof(input_box_state_t) * MAX_INPUT_BOX_COUNT);
+    hashtable_create(sizeof(input_box_state_t), MAX_INPUT_BOX_COUNT, ui.input_box_state_memory, &ui.input_box_state);
+
+    arena_allocator_create(FRAME_ALLOCATOR_SIZE, 0, &frame_allocator);
 }
 
 void ui_shutdown(void)
 {
     darray_destroy(ui.windows);
     stack_destroy(&id_stack);
+    ring_buffer_destroy(input_buffer);
+
+    free(ui.input_box_state_memory);
+    hashtable_destroy(&ui.input_box_state);
+
+    arena_allocator_destroy(&frame_allocator);
 }
 
 void ui_begin_frame(void)
@@ -181,6 +229,8 @@ void ui_end_frame(void)
 {
     ui.mouse_left_pressed_last_frame = ui.mouse_left_pressed;
     ui.mouse_screen_pos_last_frame = ui.mouse_screen_pos;
+
+    arena_allocator_free_all(&frame_allocator);
 }
 
 void ui_begin(const char *name, b8 *visible)
@@ -695,6 +745,204 @@ void ui_slider_float(const char *text, f32 *value, f32 low, f32 high)
     renderer_draw_text(text, ui.config.fa_size, text_render_pos, 1.0f, TEXT_COLOR, win->alpha);
 }
 
+b8 ui_input_text(const char *label, char *text, u32 max_size)
+{
+    ui_id id = get_widget_id(label);
+    ui_window_t *win = &ui.windows[ui.window_current_idx];
+
+    u32 num_chars = math_min(strlen(text), max_size);
+    u32 char_width = renderer_get_font_width(ui.config.fa_size);
+    if (!hashtable_key_exists(&ui.input_box_state, label)) {
+        input_box_state_t state = {
+            .text_offset = 0,
+            .cursor_offset = num_chars,
+            .content_flushed_last_frame = 0
+        };
+        hashtable_set(&ui.input_box_state, label, &state);
+    }
+
+    u32 label_width = renderer_get_font_width(ui.config.fa_size) * strlen(label);
+    u32 label_height = renderer_get_font_height(ui.config.fa_size);
+    u32 label_bearing_y = renderer_get_font_bearing_y(ui.config.fa_size);
+
+    vec2 box_pos = ui_layout_get_position(win);
+    vec2 box_size = vec2_create(
+        win->size.x - ui.config.win_inner_pad * 2.0f - label_width - ui.config.input_box_label_x_pad,
+        label_height + ui.config.input_box_y_pad * 2.0f
+    );
+
+    vec2 widget_size = vec2_create(
+        box_size.x + label_width + ui.config.input_box_label_x_pad,
+        box_size.y
+    );
+
+    ui_layout_add_widget(win, widget_size);
+
+    vec2 box_screen_pos = vec2_create(
+        win->position.x + box_pos.x,
+        win->position.y + box_pos.y
+    );
+
+    if (rect_contains(box_screen_pos, box_size, ui.mouse_screen_pos)) {
+        if (ui.mouse_left_pressed && !ui.mouse_left_pressed_last_frame) {
+            ui.active_id = id;
+            ui.input_active = true;
+        } else {
+            ui.hot_id = id;
+        }
+    } else {
+        ui.hot_id = UI_INVALID_ID;
+        if (!ui.mouse_left_pressed && ui.mouse_left_pressed_last_frame && ui.active_id == id) {
+            ui.active_id = UI_INVALID_ID;
+            ui.input_active = false;
+        }
+    }
+
+    vec3 box_color = INPUT_BOX_BACKGROUND_COLOR;
+    if (ui.hot_id == id && ui.active_id != id) {
+        box_color = INPUT_BOX_HOVER_COLOR;
+    }
+
+    vec2 win_render_pos = vec2_create(
+        win->position.x - main_window_size.x / 2.0f,
+        main_window_size.y / 2.0f - win->position.y
+    );
+
+    vec2 box_render_pos = vec2_create(
+        win_render_pos.x + box_pos.x + box_size.x / 2.0f,
+        win_render_pos.y - box_pos.y - box_size.y / 2.0f
+    );
+
+    vec2 label_render_pos = vec2_create(
+        box_render_pos.x + box_size.x / 2.0f + ui.config.input_box_label_x_pad,
+        box_render_pos.y - label_bearing_y / 2.0f
+    );
+    
+    renderer_draw_quad_color(box_render_pos, box_size, 0.0f, box_color, win->alpha);
+    renderer_draw_text(label, ui.config.fa_size, label_render_pos, 1.0f, TEXT_COLOR, win->alpha);
+
+    max_size--; // Leave the last byte for null-terminator
+
+    input_box_state_t state;
+    hashtable_get(&ui.input_box_state, label, &state);
+
+    if (state.content_flushed_last_frame) {
+        memset(text, 0, max_size);
+        num_chars = 0;
+        state.content_flushed_last_frame = false;
+        hashtable_set(&ui.input_box_state, label, &state);
+    }
+
+    u32 num_chars_visible = (box_size.x - ui.config.input_box_text_x_pad * 2.0f) / char_width;
+
+    if (ui.active_id == id) {
+        if (!ui.input_active) {
+            ui.active_id = UI_INVALID_ID;
+        }
+
+        u32 processed_keys = 0;
+        while (!ring_buffer_is_empty(input_buffer) && processed_keys < INPUT_BUFFER_MAX_PROCESSED_KEYS) {
+            u32 c;
+            b8 status;
+            ring_buffer_dequeue(input_buffer, &c, &status);
+            if (status) {
+                if (c == KEYCODE_Enter) {
+                    state.text_offset = 0;
+                    state.cursor_offset = 0;
+                    state.content_flushed_last_frame = true;
+                    hashtable_set(&ui.input_box_state, label, &state);
+                    return true;
+                } else if (c == KEYCODE_Backspace) {
+                    if (num_chars > 0 && state.cursor_offset > 0) {
+                        if (state.text_offset > 0) {
+                            state.text_offset--;
+                        }
+                        if (state.cursor_offset < num_chars) {
+                            memcpy(text + state.cursor_offset - 1, text + state.cursor_offset, num_chars - state.cursor_offset);
+                        }
+                        text[num_chars-1] = '\0';
+
+                        state.cursor_offset--;
+                        num_chars--;
+
+                        hashtable_set(&ui.input_box_state, label, &state);
+                    }
+                } else if (c == KEYCODE_Left) {
+                    if (state.cursor_offset > 0) {
+                        if (state.cursor_offset <= state.text_offset) {
+                            state.text_offset--;
+                        }
+                        state.cursor_offset--;
+                        hashtable_set(&ui.input_box_state, label, &state);
+                    }
+                } else if (c == KEYCODE_Right) {
+                    if (state.cursor_offset < num_chars) {
+                        state.cursor_offset++;
+                        if (state.cursor_offset > state.text_offset + num_chars_visible) {
+                            state.text_offset++;
+                        }
+                        hashtable_set(&ui.input_box_state, label, &state);
+                    }
+                } else {
+                    // Insert character
+                    if (num_chars >= num_chars_visible && state.cursor_offset == num_chars) {
+                        state.text_offset++;
+                    }
+                    if (state.cursor_offset == num_chars) {
+                        text[num_chars] = (char)c;
+                    } else {
+                        memcpy(text + state.cursor_offset + 1, text + state.cursor_offset, num_chars - state.cursor_offset);
+                        memcpy(text + state.cursor_offset, &c, 1);
+                    }
+
+                    if (state.text_offset + num_chars_visible == state.cursor_offset) {
+                        state.text_offset++;
+                    }
+
+                    num_chars++;
+                    state.cursor_offset++;
+
+                    hashtable_set(&ui.input_box_state, label, &state);
+                }
+                processed_keys++;
+            }
+        }
+
+        ui.input_has_space = num_chars < max_size;
+
+        // Draw border around input box
+        renderer_draw_rect(box_render_pos, box_size, INPUT_BOX_BORDER_COLOR, 1.0f);
+
+        // Draw cursor
+        vec2 cursor_render_pos = vec2_create(
+            box_render_pos.x - box_size.x / 2.0f + ui.config.input_box_text_x_pad + ((state.cursor_offset - state.text_offset) * char_width),
+            box_render_pos.y
+        );
+        vec2 cursor_size = vec2_create(
+            ui.config.input_box_cursor_width,
+            box_size.y - ui.config.input_box_cursor_y_pad * 2.0f
+        );
+        renderer_draw_quad_color(cursor_render_pos, cursor_size, 0.0f, INPUT_BOX_CURSOR_COLOR, win->alpha);
+    }
+
+    if (num_chars > 0) {
+        // Draw characters from text buffer on the input box
+        vec2 chars_render_pos = vec2_create(
+            box_render_pos.x - box_size.x / 2.0f + ui.config.input_box_text_x_pad,
+            box_render_pos.y - label_bearing_y / 2.0f
+        );
+
+        char *buffer = text;
+        if (num_chars > num_chars_visible) {
+            buffer = arena_allocator_allocate(&frame_allocator, num_chars_visible);
+            memcpy(buffer, text + state.text_offset, num_chars_visible);
+        }
+        renderer_draw_text(buffer, ui.config.fa_size, chars_render_pos, 1.0f, TEXT_COLOR, win->alpha);
+    }
+
+    return false;
+}
+
 void ui_opt_carousel(const char *label, const char **items, u32 num_items, u32 *selected_item_index)
 {
     ui_text(label);
@@ -895,6 +1143,55 @@ b8 ui_mouse_scrolled_event_callback(event_code_e code, event_data_t data)
             // TODO: Add mouse scroll handling
             return true;
         }
+    }
+
+    return false;
+}
+
+b8 ui_char_pressed_event_callback(event_code_e code, event_data_t data)
+{
+    if (ui.input_active && ui.input_has_space) {
+        b8 status;
+        ring_buffer_enqueue(input_buffer, data.u32[0], &status);
+        if (!status) {
+            LOG_WARN("failed to enqueue pressed char into input buffer");
+        }
+        return true;
+    }
+    return false;
+}
+
+b8 ui_key_pressed_event_callback(event_code_e code, event_data_t data)
+{
+    u16 key = data.u16[0];
+    if (ui.input_active) {
+        if (key == KEYCODE_Backspace || key == KEYCODE_Left || key == KEYCODE_Right || key == KEYCODE_Enter) {
+            b8 status;
+            ring_buffer_enqueue(input_buffer, (u32)data.u16[0], &status);
+            if (!status) {
+                LOG_WARN("failed to enqueue pressed key into input buffer");
+            }
+        } else if (key == KEYCODE_Escape) {
+            ui.input_active = false;
+        }
+        return true;
+    }
+
+    return false;
+}
+
+b8 ui_key_repeated_event_callback(event_code_e code, event_data_t data)
+{
+    u16 key = data.u16[0];
+    if (ui.input_active) {
+        if (key == KEYCODE_Backspace || key == KEYCODE_Left || key == KEYCODE_Right) {
+            b8 status;
+            ring_buffer_enqueue(input_buffer, (u32)data.u16[0], &status);
+            if (!status) {
+                LOG_WARN("failed to enqueue repeated key into input buffer");
+            }
+        }
+        return true;
     }
 
     return false;

@@ -26,6 +26,7 @@ b8   ui_button       (const char *text);
 b8   ui_checkbox     (const char *text, b8 *is_checked);
 b8   ui_radiobutton  (const char *text, i32 *selected_id, i32 self_id);
 void ui_slider_float (const char *text, f32 *value, f32 low, f32 high);
+b8   ui_input_text   (const char *label, char *text, u32 max_size);
 void ui_opt_carousel (const char *label, const char **items, u32 num_items, u32 *selected_item_index);
 
 void ui_separator    (void);
@@ -35,3 +36,6 @@ b8 ui_mouse_button_pressed_event_callback   (event_code_e code, event_data_t dat
 b8 ui_mouse_button_released_event_callback  (event_code_e code, event_data_t data);
 b8 ui_mouse_moved_event_callback            (event_code_e code, event_data_t data);
 b8 ui_mouse_scrolled_event_callback         (event_code_e code, event_data_t data);
+b8 ui_char_pressed_event_callback           (event_code_e code, event_data_t data);
+b8 ui_key_pressed_event_callback            (event_code_e code, event_data_t data);
+b8 ui_key_repeated_event_callback           (event_code_e code, event_data_t data);
