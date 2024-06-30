@@ -627,7 +627,12 @@ static void display_debug_info(f64 delta_time)
     static u64 network_down = 0.0f;
     net_get_bandwidth(&network_up, &network_down);
 
-    snprintf(buffer, sizeof(buffer), "network\n  up: %llu bytes/s\n  down: %llu bytes/s", network_up, network_down);
+    f32 network_up_adjusted;
+    f32 network_down_adjusted;
+    const char *network_up_unit = get_size_unit(network_up, &network_up_adjusted);
+    const char *network_down_unit = get_size_unit(network_down, &network_down_adjusted);
+    snprintf(buffer, sizeof(buffer), "network\n  up: %0.2f %s/s\n  down: %0.2f %s/s",
+             network_up_adjusted, network_up_unit, network_down_adjusted, network_down_unit);
     ui_text(buffer);
 
     char attack_buffer[32] = {0};
