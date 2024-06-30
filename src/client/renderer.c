@@ -11,6 +11,7 @@
 #include "window.h"
 #include "common/logger.h"
 #include "common/asserts.h"
+#include "common/memory/memutils.h"
 
 #define FONT_FILEPATH "assets/fonts/monogram.ttf"
 
@@ -127,8 +128,7 @@ b8 renderer_init(void)
     create_shaders();
 
     // quad
-    renderer_data.quad_vertex_buffer_base = malloc(RENDERER_MAX_VERTEX_COUNT * sizeof(quad_vertex_t));
-    memset(renderer_data.quad_vertex_buffer_base, 0, RENDERER_MAX_VERTEX_COUNT * sizeof(quad_vertex_t));
+    renderer_data.quad_vertex_buffer_base = mem_alloc(RENDERER_MAX_VERTEX_COUNT * sizeof(quad_vertex_t), MEMORY_TAG_RENDERER);
 
     renderer_data.white_texture_slot = 0;
     renderer_data.texture_slot_index = 1;
@@ -191,7 +191,7 @@ b8 renderer_init(void)
     texture_create_from_spec(spec, &white_texture_data, &renderer_data.white_texture, "white");
 
     renderer_data.texture_slots[0] = renderer_data.white_texture.id;
-    memset(&renderer_data.texture_slots[1], 0, RENDERER_MAX_TEXTURE_COUNT - 1);
+    mem_zero(&renderer_data.texture_slots[1], RENDERER_MAX_TEXTURE_COUNT - 1);
 
     i32 samplers[RENDERER_MAX_TEXTURE_COUNT];
     for (u32 i = 0; i < RENDERER_MAX_TEXTURE_COUNT; i++) {
@@ -202,8 +202,7 @@ b8 renderer_init(void)
     shader_set_uniform_int_array(&renderer_data.quad_shader, "u_textures", samplers, 32);
 
     // circle
-    renderer_data.circle_vertex_buffer_base = malloc(RENDERER_MAX_VERTEX_COUNT * sizeof(circle_vertex_t));
-    memset(renderer_data.circle_vertex_buffer_base, 0, RENDERER_MAX_VERTEX_COUNT * sizeof(circle_vertex_t));
+    renderer_data.circle_vertex_buffer_base = mem_alloc(RENDERER_MAX_VERTEX_COUNT * sizeof(circle_vertex_t), MEMORY_TAG_RENDERER);
 
     glCreateVertexArrays(1, &renderer_data.circle_va);
     glBindVertexArray(renderer_data.circle_va);
@@ -232,8 +231,7 @@ b8 renderer_init(void)
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
 
     // line
-    renderer_data.line_vertex_buffer_base = malloc(RENDERER_MAX_VERTEX_COUNT * sizeof(line_vertex_t));
-    memset(renderer_data.line_vertex_buffer_base, 0, RENDERER_MAX_VERTEX_COUNT * sizeof(line_vertex_t));
+    renderer_data.line_vertex_buffer_base = mem_alloc(RENDERER_MAX_VERTEX_COUNT * sizeof(line_vertex_t), MEMORY_TAG_RENDERER);
 
     glCreateVertexArrays(1, &renderer_data.line_va);
     glBindVertexArray(renderer_data.line_va);
@@ -251,8 +249,7 @@ b8 renderer_init(void)
     renderer_set_line_width(2.0f);
 
     // text
-    renderer_data.text_vertex_buffer_base = malloc(RENDERER_MAX_VERTEX_COUNT * sizeof(text_vertex_t));
-    memset(renderer_data.text_vertex_buffer_base, 0, RENDERER_MAX_VERTEX_COUNT * sizeof(text_vertex_t));
+    renderer_data.text_vertex_buffer_base = mem_alloc(RENDERER_MAX_VERTEX_COUNT * sizeof(text_vertex_t), MEMORY_TAG_RENDERER);
 
     glCreateVertexArrays(1, &renderer_data.text_va);
     glBindVertexArray(renderer_data.text_va);
@@ -295,10 +292,10 @@ b8 renderer_init(void)
 
 void renderer_shutdown(void)
 {
-    free(renderer_data.quad_vertex_buffer_base);
-    free(renderer_data.circle_vertex_buffer_base);
-    free(renderer_data.line_vertex_buffer_base);
-    free(renderer_data.text_vertex_buffer_base);
+    mem_free(renderer_data.quad_vertex_buffer_base  , RENDERER_MAX_VERTEX_COUNT * sizeof(quad_vertex_t)  , MEMORY_TAG_RENDERER);
+    mem_free(renderer_data.circle_vertex_buffer_base, RENDERER_MAX_VERTEX_COUNT * sizeof(circle_vertex_t), MEMORY_TAG_RENDERER);
+    mem_free(renderer_data.line_vertex_buffer_base  , RENDERER_MAX_VERTEX_COUNT * sizeof(line_vertex_t)  , MEMORY_TAG_RENDERER);
+    mem_free(renderer_data.text_vertex_buffer_base  , RENDERER_MAX_VERTEX_COUNT * sizeof(text_vertex_t)  , MEMORY_TAG_RENDERER);
 
     texture_destroy(&renderer_data.white_texture);
 
@@ -350,7 +347,7 @@ void renderer_end_scene(void)
 
 void renderer_reset_stats(void)
 {
-    memset(&renderer_stats, 0, sizeof(renderer_stats_t));
+    mem_zero(&renderer_stats, sizeof(renderer_stats_t));
 }
 
 void renderer_clear_screen(vec4 color)
@@ -715,7 +712,7 @@ static void create_font_atlas(FT_Face ft_face, u32 height, font_atlas_t *out_atl
         return;
     }
 
-    memset(out_atlas, 0, sizeof(font_atlas_t));
+    mem_zero(out_atlas, sizeof(font_atlas_t));
 
     i32 w = 0, h = 0, by = 0;
     FT_GlyphSlot g = ft_face->glyph;

@@ -4,6 +4,7 @@
 #include <stdlib.h>
 
 #include "common/asserts.h"
+#include "common/memory/memutils.h"
 
 #define HEADER_SIZE (DARRAY_FIELD_COUNT * sizeof(u64))
 
@@ -13,8 +14,7 @@ void *_darray_create(u64 capacity, u64 stride)
     ASSERT(stride > 0);
 
     u64 total_size = HEADER_SIZE + capacity * stride;
-    u64 *memory = (u64 *)malloc(total_size);
-    memset(memory, 0, total_size);
+    u64 *memory = (u64 *)mem_alloc(total_size, MEMORY_TAG_DARRAY);
 
     memory[DARRAY_FIELD_CAPACITY] = capacity;
     memory[DARRAY_FIELD_STRIDE]   = stride;
@@ -27,12 +27,15 @@ void _darray_destroy(void *array)
 {
     ASSERT(array);
 
+    u64 capacity = darray_capacity(array);
+    u64 stride = darray_stride(array);
+
     _darray_field_set(array, DARRAY_FIELD_CAPACITY, 0);
     _darray_field_set(array, DARRAY_FIELD_STRIDE, 0);
     _darray_field_set(array, DARRAY_FIELD_LENGTH, 0);
 
     u64 *header = (u64 *)array - DARRAY_FIELD_COUNT;
-    free(header);
+    mem_free(header, HEADER_SIZE + capacity * stride, MEMORY_TAG_DARRAY);
 }
 
 void *_darray_resize(void *array, u64 new_capacity)
@@ -47,7 +50,7 @@ void *_darray_resize(void *array, u64 new_capacity)
     UNUSED(capacity); // prevents compiler warning in release mode
 
     void *new_array = _darray_create(new_capacity, stride);
-    memcpy(new_array, array, length * stride);
+    mem_copy(new_array, array, length * stride);
 
     _darray_field_set(new_array, DARRAY_FIELD_LENGTH, length);
     _darray_destroy(array);
@@ -67,7 +70,7 @@ void *_darray_push(void *array, const void *element)
         array = _darray_resize(array, capacity * DARRAY_DEFAULT_RESIZE_FACTOR);
     }
 
-    memcpy((u8 *)array + (length * stride), element, stride);
+    mem_copy((u8 *)array + (length * stride), element, stride);
     _darray_field_set(array, DARRAY_FIELD_LENGTH, length + 1);
     return array;
 }
@@ -84,7 +87,7 @@ void _darray_pop(void *array, void *out_element)
 
     if (out_element) {
         u8 *data = (u8 *)&header[DARRAY_FIELD_COUNT];
-        memcpy(out_element, data + ((length - 1) * stride), stride);
+        mem_copy(out_element, data + ((length - 1) * stride), stride);
     }
 
     _darray_field_set(array, DARRAY_FIELD_LENGTH, length - 1);
@@ -105,8 +108,8 @@ void *_darray_push_at(void *array, u64 index, const void *element)
         array = _darray_resize(array, capacity * DARRAY_DEFAULT_RESIZE_FACTOR);
     }
 
-    memcpy((u8 *)array + ((index + 1) * stride), (u8 *)array + (index * stride), (length - index) * stride);
-    memcpy((u8 *)array + (index * stride), element, stride);
+    mem_copy((u8 *)array + ((index + 1) * stride), (u8 *)array + (index * stride), (length - index) * stride);
+    mem_copy((u8 *)array + (index * stride), element, stride);
     _darray_field_set(array, DARRAY_FIELD_LENGTH, length + 1);
     return array;
 }
@@ -124,10 +127,10 @@ void _darray_pop_at(void *array, u64 index, void *out_element)
 
     if (out_element) {
         u8 *data = (u8 *)&header[DARRAY_FIELD_COUNT];
-        memcpy(out_element, data + (index * stride), stride);
+        mem_copy(out_element, data + (index * stride), stride);
     }
 
-    memcpy((u8 *)array + (index * stride), (u8 *)array + ((index + 1) * stride), (length - index - 1) * stride);
+    mem_copy((u8 *)array + (index * stride), (u8 *)array + ((index + 1) * stride), (length - index - 1) * stride);
     _darray_field_set(array, DARRAY_FIELD_LENGTH, length - 1);
 }
 

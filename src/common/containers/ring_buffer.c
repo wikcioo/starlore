@@ -4,6 +4,7 @@
 #include <stdlib.h>
 
 #include "common/asserts.h"
+#include "common/memory/memutils.h"
 
 #define HEADER_SIZE (RING_BUFFER_FIELD_COUNT * sizeof(u64))
 
@@ -13,8 +14,7 @@ void *_ring_buffer_create(u64 capacity, u64 stride)
     ASSERT(stride > 0);
 
     u64 total_size = HEADER_SIZE + capacity * stride;
-    u64 *memory = (u64 *)malloc(total_size);
-    memset(memory, 0, total_size);
+    u64 *memory = (u64 *)mem_alloc(total_size, MEMORY_TAG_RING_BUFFER);
 
     memory[RING_BUFFER_FIELD_CAPACITY] = capacity + 1;
     memory[RING_BUFFER_FIELD_STRIDE]   = stride;
@@ -28,13 +28,16 @@ void _ring_buffer_destroy(void *ring_buffer)
 {
     ASSERT(ring_buffer);
 
+    u64 capacity = ring_buffer_capacity(ring_buffer);
+    u64 stride = ring_buffer_stride(ring_buffer);
+
     _ring_buffer_field_set(ring_buffer, RING_BUFFER_FIELD_CAPACITY, 0);
     _ring_buffer_field_set(ring_buffer, RING_BUFFER_FIELD_STRIDE, 0);
     _ring_buffer_field_set(ring_buffer, RING_BUFFER_FIELD_HEAD, 0);
     _ring_buffer_field_set(ring_buffer, RING_BUFFER_FIELD_TAIL, 0);
 
     u64 *header = (u64 *)ring_buffer - RING_BUFFER_FIELD_COUNT;
-    free(header);
+    mem_free(header, HEADER_SIZE + capacity * stride, MEMORY_TAG_RING_BUFFER);
 }
 
 void _ring_buffer_enqueue(void *ring_buffer, const void *element, b8 *status)
@@ -53,7 +56,7 @@ void _ring_buffer_enqueue(void *ring_buffer, const void *element, b8 *status)
     u64 stride = ring_buffer_stride(ring_buffer);
     u64 head = ring_buffer_head(ring_buffer);
 
-    memcpy((u8 *)ring_buffer + (head * stride), element, stride);
+    mem_copy((u8 *)ring_buffer + (head * stride), element, stride);
     _ring_buffer_field_set(ring_buffer, RING_BUFFER_FIELD_HEAD, (head + 1) % (capacity - 1));
     if (status) {
         *status = true;
@@ -75,7 +78,7 @@ void _ring_buffer_dequeue(void *ring_buffer, void *out_element, b8 *status)
     u64 stride = ring_buffer_stride(ring_buffer);
     u64 tail = ring_buffer_tail(ring_buffer);
 
-    memcpy(out_element, (u8 *)ring_buffer + (tail * stride), stride);
+    mem_copy(out_element, (u8 *)ring_buffer + (tail * stride), stride);
     _ring_buffer_field_set(ring_buffer, RING_BUFFER_FIELD_TAIL, (tail + 1) % (capacity - 1));
     if (status) {
         *status = true;
@@ -130,7 +133,7 @@ b8 _ring_buffer_peek_from_end(void *ring_buffer, u64 n, void *out_element)
         return false;
     }
 
-    memcpy(out_element, (u8 *)ring_buffer + (element_index * stride), stride);
+    mem_copy(out_element, (u8 *)ring_buffer + (element_index * stride), stride);
     return true;
 }
 

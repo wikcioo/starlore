@@ -8,6 +8,7 @@
 #include "common/logger.h"
 #include "common/asserts.h"
 #include "common/filesystem.h"
+#include "common/memory/memutils.h"
 
 b8 shader_create(const shader_create_info_t *create_info, shader_t *out_shader)
 {
@@ -30,9 +31,9 @@ b8 shader_create(const shader_create_info_t *create_info, shader_t *out_shader)
     filesystem_get_size(&vertex_file_handle, &vertex_file_size);
     filesystem_get_size(&fragment_file_handle, &fragment_file_size);
 
-    // TODO: Replace with custom allocator
-    char *vertex_source_buffer = (char *)malloc(vertex_file_size+1);
-    char *fragment_source_buffer = (char *)malloc(fragment_file_size+1);
+    // TODO: Replace with arena allocator
+    char *vertex_source_buffer = (char *)mem_alloc(vertex_file_size+1, MEMORY_TAG_OPENGL);
+    char *fragment_source_buffer = (char *)mem_alloc(fragment_file_size+1, MEMORY_TAG_OPENGL);
 
     if (!filesystem_read_all(&vertex_file_handle, vertex_source_buffer, NULL)) {
         LOG_ERROR("failed to read all bytes from file at '%s'", create_info->vertex_filepath);
@@ -72,8 +73,8 @@ b8 shader_create(const shader_create_info_t *create_info, shader_t *out_shader)
         LOG_ERROR("failed to compile fragment shader: %s", info_log);
     }
 
-    free(vertex_source_buffer);
-    free(fragment_source_buffer);
+    mem_free(vertex_source_buffer, vertex_file_size+1, MEMORY_TAG_OPENGL);
+    mem_free(fragment_source_buffer, fragment_file_size+1, MEMORY_TAG_OPENGL);
 
     u32 program = glCreateProgram();
     glAttachShader(program, vertex_shader);

@@ -11,6 +11,7 @@
 #include "common/logger.h"
 #include "common/asserts.h"
 #include "common/filesystem.h"
+#include "common/memory/memutils.h"
 
 static u32 image_format_to_opengl_format(image_format_e format)
 {
@@ -40,7 +41,7 @@ void texture_create_from_path(const char *filepath, texture_t *out_texture)
         return;
     }
 
-    memset(out_texture, 0, sizeof(texture_t));
+    mem_zero(out_texture, sizeof(texture_t));
     out_texture->width = width;
     out_texture->height = height;
 
@@ -77,7 +78,7 @@ void texture_create_from_spec(texture_specification_t spec, void *data, texture_
 
     u32 format = image_format_to_opengl_format(spec.format);
 
-    memset(out_texture, 0, sizeof(texture_t));
+    mem_zero(out_texture, sizeof(texture_t));
     out_texture->width = spec.width;
     out_texture->height = spec.height;
     out_texture->format = format;

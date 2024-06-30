@@ -37,6 +37,7 @@
 #include "common/logger.h"
 #include "common/maths.h"
 #include "common/input_codes.h"
+#include "common/memory/memutils.h"
 #include "common/containers/ring_buffer.h"
 
 #define POLLFD_COUNT 2
@@ -158,7 +159,7 @@ static void handle_stdin_event(void)
             }
 
             input_count = 0;
-            memset(input_buffer, 0, INPUT_BUFFER_SIZE);
+            mem_zero(input_buffer, INPUT_BUFFER_SIZE);
         } else if (input_count > 0) {
             char *input_trimmed = string_trim(input_buffer);
             if (strlen(input_trimmed) < 1) {
@@ -177,7 +178,7 @@ static void handle_stdin_event(void)
             }
 
             input_count = 0;
-            memset(input_buffer, 0, INPUT_BUFFER_SIZE);
+            mem_zero(input_buffer, INPUT_BUFFER_SIZE);
         }
     }
 }
@@ -247,8 +248,8 @@ static void handle_socket_event(void)
                     chat_add_system_message(message->content);
                 } else if (message->type == MESSAGE_TYPE_PLAYER) {
                     chat_player_message_t msg = {0};
-                    memcpy(msg.name, message->author, strlen(message->author));
-                    memcpy(msg.content, message->content, strlen(message->content));
+                    mem_copy(msg.name, message->author, strlen(message->author));
+                    mem_copy(msg.content, message->content, strlen(message->content));
                     chat_add_player_message(msg);
                 } else {
                     LOG_ERROR("unknown single message type %d", message->type);
@@ -263,8 +264,8 @@ static void handle_socket_event(void)
                         chat_add_system_message(message.content);
                     } else if (message.type == MESSAGE_TYPE_PLAYER) {
                         chat_player_message_t msg = {0};
-                        memcpy(msg.name, message.author, strlen(message.author));
-                        memcpy(msg.content, message.content, strlen(message.content));
+                        mem_copy(msg.name, message.author, strlen(message.author));
+                        mem_copy(msg.content, message.content, strlen(message.content));
                         chat_add_player_message(msg);
                     } else {
                         LOG_ERROR("unknown history message type %d", message.type);
@@ -282,7 +283,7 @@ static void handle_socket_event(void)
 
                 packet_player_init_confirm_t player_confirm_packet = {0};
                 player_confirm_packet.id = self_player.base.id;
-                memcpy(player_confirm_packet.name, username, strlen(username));
+                mem_copy(player_confirm_packet.name, username, strlen(username));
                 if (!packet_send(client_socket, PACKET_TYPE_PLAYER_INIT_CONF, &player_confirm_packet)) {
                     LOG_ERROR("failed to send player init confirm packet");
                 }
@@ -590,7 +591,7 @@ static void display_debug_info(f64 delta_time)
 {
     static ui_window_config_t debug_window_conf = {
         .position  = (vec2){ .x =   5, .y =  30 },
-        .size      = (vec2){ .x = 200, .y = 300 },
+        .size      = (vec2){ .x = 200, .y = 420 },
         .draggable = true,
         .resizable = false,
         .font_size = FA16,
@@ -660,6 +661,10 @@ static void display_debug_info(f64 delta_time)
         snprintf(buffer, sizeof(buffer), "chunks in cache\n  count: %llu\n  mem usage: %.02f %s", chunks_count, chunk_mem_usage_formatted, unit);
         ui_text(buffer);
     }
+
+    char *usage_str = get_memory_usage_str();
+    ui_text(usage_str);
+    free(usage_str);
 
     ui_separator();
     ui_text("ACTIONS");
@@ -833,7 +838,7 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
-    memcpy(username, argv[3], strlen(argv[3]));
+    mem_copy(username, argv[3], strlen(argv[3]));
 
     if (!window_create(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT, "StarLore")) {
         LOG_ERROR("failed to create window");
@@ -851,7 +856,7 @@ int main(int argc, char *argv[])
     }
 
     struct addrinfo hints, *result, *rp;
-    memset(&hints, 0, sizeof(hints));
+    mem_zero(&hints, sizeof(hints));
 
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
@@ -1025,7 +1030,7 @@ int main(int argc, char *argv[])
         ui_end_frame();
 #endif
 
-        memcpy(&prev_frame_renderer_stats, &renderer_stats, sizeof(renderer_stats));
+        mem_copy(&prev_frame_renderer_stats, &renderer_stats, sizeof(renderer_stats));
 
         window_poll_events();
         window_swap_buffers();

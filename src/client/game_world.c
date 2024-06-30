@@ -12,6 +12,7 @@
 #include "common/asserts.h"
 #include "common/input_codes.h"
 #include "common/perlin_noise.h"
+#include "common/memory/memutils.h"
 #include "common/containers/darray.h"
 
 #define CHUNK_WIDTH_PX  (CHUNK_LENGTH * TILE_WIDTH_PX)
@@ -51,7 +52,7 @@ void game_world_init(packet_game_world_init_t *packet, game_world_t *out_game_wo
     ASSERT(packet);
     ASSERT(out_game_world);
 
-    memcpy(&out_game_world->map, &packet->map, sizeof(game_map_t));
+    mem_copy(&out_game_world->map, &packet->map, sizeof(game_map_t));
     out_game_world->objects = darray_create(sizeof(game_object_t));
 }
 
@@ -115,7 +116,7 @@ static void game_world_render_chunk(chunk_t *chunk, i32 x, i32 y)
         static const vec2 size = {{ TILE_WIDTH_PX, TILE_HEIGHT_PX }};
 
         vec2 tex_coord[4] = {0};
-        memcpy(tex_coord, &terrain_tex_coord[tile_type], sizeof(vec2) * TEX_COORD_COUNT);
+        mem_copy(tex_coord, &terrain_tex_coord[tile_type], sizeof(vec2) * TEX_COORD_COUNT);
 
         renderer_draw_quad_sprite_uv(position, size, 0.0f, &terrain_spritesheet, tex_coord);
     }
@@ -127,7 +128,7 @@ static void game_world_render_chunk(chunk_t *chunk, i32 x, i32 y)
 
 static void game_world_load_chunk(game_world_t *game_world, i32 x, i32 y, chunk_t **out_chunk)
 {
-    f32 *perlin_noise_data = malloc(CHUNK_NUM_TILES * sizeof(f32));
+    f32 *perlin_noise_data = mem_alloc(CHUNK_NUM_TILES * sizeof(f32), MEMORY_TAG_GAME);
 
     perlin_noise_config_t config = {
         .pos_x = x * CHUNK_LENGTH,
@@ -164,7 +165,8 @@ static void game_world_load_chunk(game_world_t *game_world, i32 x, i32 y, chunk_
     }
 
 #if defined(DEBUG)
-    u8 *perlin_noise_color = malloc(CHUNK_NUM_TILES * sizeof(u8));
+    u8 *perlin_noise_color = mem_alloc(CHUNK_NUM_TILES * sizeof(u8), MEMORY_TAG_GAME);
+    
     for (u32 i = 0; i < CHUNK_NUM_TILES; i++) {
         perlin_noise_color[i] = (u8)(perlin_noise_data[i] * 255.0f);
     }
@@ -180,7 +182,7 @@ static void game_world_load_chunk(game_world_t *game_world, i32 x, i32 y, chunk_
     snprintf(name, sizeof(name), "perlin_noise (%i:%i)", x, y);
     texture_create_from_spec(perlin_noise_texture_spec, perlin_noise_color, &new_chunk.perlin_noise_texture, name);
 
-    free(perlin_noise_color);
+    mem_free(perlin_noise_color, CHUNK_NUM_TILES * sizeof(u8), MEMORY_TAG_GAME);
 #endif
 
     u64 chunks_length = darray_length(chunks);
@@ -206,7 +208,7 @@ static void game_world_load_chunk(game_world_t *game_world, i32 x, i32 y, chunk_
 #if defined(DEBUG)
         texture_destroy(&oldest_chunk->perlin_noise_texture);
 #endif
-        memcpy(oldest_chunk, &new_chunk, sizeof(chunk_t));
+        mem_copy(oldest_chunk, &new_chunk, sizeof(chunk_t));
         *out_chunk = oldest_chunk;
     } else {
         // Append new chunk to cache
@@ -214,7 +216,7 @@ static void game_world_load_chunk(game_world_t *game_world, i32 x, i32 y, chunk_
         *out_chunk = &chunks[chunks_length-1];
     }
 
-    free(perlin_noise_data);
+    mem_free(perlin_noise_data, CHUNK_NUM_TILES * sizeof(f32), MEMORY_TAG_GAME);
 }
 
 void game_world_render(game_world_t *game_world, const camera_t *const camera)
@@ -308,7 +310,7 @@ void game_world_render(game_world_t *game_world, const camera_t *const camera)
         vec2 size = vec2_create(TILE_WIDTH_PX, TILE_HEIGHT_PX);
 
         vec2 tex_coord[4] = {0};
-        memcpy(tex_coord, &vegetation_tex_coord[game_world->objects[i].type], sizeof(vec2) * TEX_COORD_COUNT);
+        mem_copy(tex_coord, &vegetation_tex_coord[game_world->objects[i].type], sizeof(vec2) * TEX_COORD_COUNT);
 
         renderer_draw_quad_sprite_uv(position, size, 0.0f, &vegetation_spritesheet, tex_coord);
     }

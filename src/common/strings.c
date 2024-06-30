@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "asserts.h"
+#include "memory/memutils.h"
 
 u64 string_hash(const char *str)
 {
@@ -26,8 +27,8 @@ void string_insert_char(char *str, u32 index, char c)
     u32 length = strlen(str);
     ASSERT(index < length);
 
-    memcpy(str + index + 1, str + index, length - index);
-    memcpy(str + index, &c, 1);
+    mem_copy(str + index + 1, str + index, length - index);
+    mem_copy(str + index, &c, 1);
 }
 
 char* string_trim(char* str)

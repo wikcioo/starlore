@@ -69,10 +69,10 @@ $(BUILD_DIR)/common/%.c.o: $(COMMON_DIR)/%.c
 	$(CC) -c $(WARNINGS) $(CFLAGS) -I$(SRC_DIR) $^ -o $@
 
 $(BUILD_DIR)/common/%.c.o: $(COMMON_DIR)/containers/%.c
-	$(CC) -c $(WARNINGS) $(CFLAGS) -I$(SRC_DIR) $^ -o $@
+	$(CC) -c $(WARNINGS) $(CFLAGS) -I$(SRC_DIR) -I$(SRC_DIR)/common $^ -o $@
 
 $(BUILD_DIR)/common/%.c.o: $(COMMON_DIR)/memory/%.c
-	$(CC) -c $(WARNINGS) $(CFLAGS) -I$(SRC_DIR) $^ -o $@
+	$(CC) -c $(WARNINGS) $(CFLAGS) -I$(SRC_DIR) -I$(SRC_DIR)/common $^ -o $@
 
 clean:
 	rm -rf $(BUILD_DIR)

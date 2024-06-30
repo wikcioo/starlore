@@ -15,6 +15,7 @@
 #include "common/containers/hashtable.h"
 #include "common/containers/ring_buffer.h"
 #include "common/memory/arena_allocator.h"
+#include "common/memory/memutils.h"
 
 // TODO: make configurable and create ui color pallete
 #define TEXT_COLOR                          vec3_create(0.93f, 0.89f, 0.75f)
@@ -202,7 +203,7 @@ void ui_init(void)
     stack_create(sizeof(ui_id), &id_stack);
     input_buffer = ring_buffer_reserve(INPUT_BUFFER_CAPACITY, sizeof(u32));
 
-    ui.input_box_state_memory = malloc(sizeof(input_box_state_t) * MAX_INPUT_BOX_COUNT);
+    ui.input_box_state_memory = mem_alloc(MAX_INPUT_BOX_COUNT * sizeof(input_box_state_t), MEMORY_TAG_HASHTABLE);
     hashtable_create(sizeof(input_box_state_t), MAX_INPUT_BOX_COUNT, ui.input_box_state_memory, &ui.input_box_state);
 
     arena_allocator_create(FRAME_ALLOCATOR_SIZE, 0, &frame_allocator);
@@ -214,7 +215,7 @@ void ui_shutdown(void)
     stack_destroy(&id_stack);
     ring_buffer_destroy(input_buffer);
 
-    free(ui.input_box_state_memory);
+    mem_free(ui.input_box_state_memory, MAX_INPUT_BOX_COUNT * sizeof(input_box_state_t), MEMORY_TAG_HASHTABLE);
     hashtable_destroy(&ui.input_box_state);
 
     arena_allocator_destroy(&frame_allocator);
@@ -827,7 +828,7 @@ b8 ui_input_text(const char *label, char *text, u32 max_size)
     hashtable_get(&ui.input_box_state, label, &state);
 
     if (state.content_flushed_last_frame) {
-        memset(text, 0, max_size);
+        mem_zero(text, max_size);
         num_chars = 0;
         state.content_flushed_last_frame = false;
         hashtable_set(&ui.input_box_state, label, &state);
@@ -858,7 +859,7 @@ b8 ui_input_text(const char *label, char *text, u32 max_size)
                             state.text_offset--;
                         }
                         if (state.cursor_offset < num_chars) {
-                            memcpy(text + state.cursor_offset - 1, text + state.cursor_offset, num_chars - state.cursor_offset);
+                            mem_copy(text + state.cursor_offset - 1, text + state.cursor_offset, num_chars - state.cursor_offset);
                         }
                         text[num_chars-1] = '\0';
 
@@ -891,8 +892,8 @@ b8 ui_input_text(const char *label, char *text, u32 max_size)
                     if (state.cursor_offset == num_chars) {
                         text[num_chars] = (char)c;
                     } else {
-                        memcpy(text + state.cursor_offset + 1, text + state.cursor_offset, num_chars - state.cursor_offset);
-                        memcpy(text + state.cursor_offset, &c, 1);
+                        mem_copy(text + state.cursor_offset + 1, text + state.cursor_offset, num_chars - state.cursor_offset);
+                        mem_copy(text + state.cursor_offset, &c, 1);
                     }
 
                     if (state.text_offset + num_chars_visible == state.cursor_offset) {
@@ -935,7 +936,7 @@ b8 ui_input_text(const char *label, char *text, u32 max_size)
         char *buffer = text;
         if (num_chars > num_chars_visible) {
             buffer = arena_allocator_allocate(&frame_allocator, num_chars_visible);
-            memcpy(buffer, text + state.text_offset, num_chars_visible);
+            mem_copy(buffer, text + state.text_offset, num_chars_visible);
         }
         renderer_draw_text(buffer, ui.config.fa_size, chars_render_pos, 1.0f, TEXT_COLOR, win->alpha);
     }

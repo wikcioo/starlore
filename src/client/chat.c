@@ -13,6 +13,7 @@
 #include "common/asserts.h"
 #include "common/logger.h"
 #include "common/containers/darray.h"
+#include "common/memory/memutils.h"
 
 #define MAX_INPUT_BUFFER_LENGTH (MESSAGE_MAX_CONTENT_LENGTH - 5)
 
@@ -91,8 +92,8 @@ static b8 insert_char(char c)
     if (cursor_offset == input_count) {
         input_buffer[input_count] = c;
     } else {
-        memcpy(input_buffer + cursor_offset + 1, input_buffer + cursor_offset, input_count - cursor_offset);
-        memcpy(input_buffer + cursor_offset, &c, 1);
+        mem_copy(input_buffer + cursor_offset + 1, input_buffer + cursor_offset, input_count - cursor_offset);
+        mem_copy(input_buffer + cursor_offset, &c, 1);
     }
 
     if (text_offset + num_chars_per_row == cursor_offset) {
@@ -117,7 +118,7 @@ static b8 remove_char(void)
     if (cursor_offset == input_count) {
         input_buffer[input_count - 1] = '\0';
     } else {
-        memcpy(input_buffer + cursor_offset - 1, input_buffer + cursor_offset, input_count - cursor_offset);
+        mem_copy(input_buffer + cursor_offset - 1, input_buffer + cursor_offset, input_count - cursor_offset);
         input_buffer[input_count - 1] = '\0';
     }
 
@@ -190,7 +191,7 @@ b8 chat_key_pressed_event_callback(event_code_e code, event_data_t data)
         }
 
         if (parsed_successfully) {
-            memset(input_buffer, 0, input_count);
+            mem_zero(input_buffer, input_count);
             input_count = 0;
             cursor_offset = 0;
             text_offset = 0;
@@ -274,7 +275,7 @@ b8 chat_window_resized_event_callback(event_code_e code, event_data_t data)
 void chat_add_player_message(chat_player_message_t message)
 {
     if (strcmp(username, message.name) == 0) {
-        memcpy(message.name, "you", 4);
+        mem_copy(message.name, "you", 4);
     }
 
     message_t msg = {0};
@@ -300,7 +301,7 @@ static void chat_render_next_row(const char *str, u32 length, u32 offset, vec3 c
 
     char buffer[128] = {0};
     ASSERT(length < 128);
-    memcpy(buffer, str, length);
+    mem_copy(buffer, str, length);
     renderer_draw_text(buffer, fa, pos, 1.0f, color, 1.0f);
 }
 
@@ -330,7 +331,7 @@ void chat_render(void)
         );
         if (input_count > num_chars_per_row) {
             char buffer[MAX_INPUT_BUFFER_LENGTH] = {0};
-            memcpy(buffer, input_buffer + text_offset, num_chars_per_row);
+            mem_copy(buffer, input_buffer + text_offset, num_chars_per_row);
             renderer_draw_text(buffer, fa, chars_pos, 1.0f, COLOR_MILK, 1.0f);
         } else {
             renderer_draw_text(input_buffer, fa, chars_pos, 1.0f, COLOR_MILK, 1.0f);

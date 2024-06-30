@@ -13,6 +13,7 @@
 #include "common/logger.h"
 #include "common/input_codes.h"
 #include "common/containers/ring_buffer.h"
+#include "common/memory/memutils.h"
 
 #define PLAYER_ANIMATION_KEYFRAME_COUNT 4
 #define PLAYER_ANIMATION_FRAME_DURATION (1.0f / PLAYER_ANIMATION_FPS)
@@ -124,7 +125,7 @@ static void player_base_create(player_id id, const char *name, vec2 position, ve
     ASSERT(out_player_base);
 
     out_player_base->id = id;
-    memcpy(out_player_base->name, name, strlen(name));
+    mem_copy(out_player_base->name, name, strlen(name));
     out_player_base->position = position;
     out_player_base->color = color;
     out_player_base->health = health;
@@ -138,7 +139,7 @@ void player_self_create(const char *name, packet_player_init_t *packet, player_s
 {
     ASSERT(out_player_self);
 
-    memset(out_player_self, 0, sizeof(player_self_t));
+    mem_zero(out_player_self, sizeof(player_self_t));
     player_base_create(packet->id, name, packet->position, packet->color, packet->health,
                        packet->state, packet->direction, &out_player_self->base);
 
@@ -151,7 +152,7 @@ void player_remote_create(packet_player_add_t *packet, player_remote_t *out_play
 {
     ASSERT(out_player_remote);
 
-    memset(out_player_remote, 0, sizeof(player_remote_t));
+    mem_zero(out_player_remote, sizeof(player_remote_t));
     player_base_create(packet->id, packet->name, packet->position, packet->color, packet->health,
                        packet->state, packet->direction, &out_player_remote->base);
 
@@ -446,7 +447,7 @@ static void player_base_render(player_base_t *base, f64 delta_time, vec2 positio
     }
 
     vec2 tex_coord[4] = {0};
-    memcpy(tex_coord, animation_tex_coord, sizeof(vec2) * 4);
+    mem_copy(tex_coord, animation_tex_coord, sizeof(vec2) * 4);
 
     if (base->animation.damage.is_damaged && base->animation.damage.accumulator >= PLAYER_DAMAGED_HIGHLIGHT_DURATION) {
         base->animation.damage.is_damaged = false;

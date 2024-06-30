@@ -5,12 +5,13 @@
 #include "common/logger.h"
 #include "common/asserts.h"
 #include "common/containers/darray.h"
+#include "common/memory/memutils.h"
 
 void stack_create(u64 stride, stack_t *out_stack)
 {
     ASSERT(out_stack);
 
-    memset(out_stack, 0, sizeof(stack_t));
+    mem_zero(out_stack, sizeof(stack_t));
     out_stack->memory = darray_reserve(STACK_DEFAULT_CAPACITY, stride);
 }
 
@@ -31,7 +32,7 @@ b8 stack_peek(stack_t *stack, void *out_element)
     }
 
     u64 stride = darray_stride(stack->memory);
-    memcpy(out_element, (u8 *)stack->memory + (element_count-1) * stride, stride);
+    mem_copy(out_element, (u8 *)stack->memory + (element_count-1) * stride, stride);
     return true;
 }
 

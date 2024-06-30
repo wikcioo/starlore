@@ -8,6 +8,7 @@
 #include "common/net.h"
 #include "common/asserts.h"
 #include "common/logger.h"
+#include "common/memory/memutils.h"
 
 static u64 packet_sequence_number = 0;
 
@@ -21,12 +22,12 @@ b8 packet_send(i32 socket, u32 type, void *packet_data)
         .size = PACKET_TYPE_SIZE[type]
     };
 
+    // TODO: Replace with arena allocator
     u32 buffer_size = sizeof(packet_header_t) + header.size;
-    b8 *buffer = (b8 *)malloc(buffer_size);
-    memset(buffer, 0, buffer_size);
+    b8 *buffer = (b8 *)mem_alloc(buffer_size, MEMORY_TAG_NETWORK);
 
-    memcpy(buffer, (void *)&header, sizeof(packet_header_t));
-    memcpy(buffer + sizeof(packet_header_t), packet_data, header.size);
+    mem_copy(buffer, (void *)&header, sizeof(packet_header_t));
+    mem_copy(buffer + sizeof(packet_header_t), packet_data, header.size);
 
     // TODO: Change it to add data to the queue instead of sending it straightaway
     i64 bytes_sent_total = 0;
@@ -40,7 +41,7 @@ b8 packet_send(i32 socket, u32 type, void *packet_data)
         bytes_sent_total += bytes_sent;
     }
 
-    free(buffer);
+    mem_free(buffer, buffer_size, MEMORY_TAG_NETWORK);
 
     return bytes_sent_total == buffer_size;
 }
