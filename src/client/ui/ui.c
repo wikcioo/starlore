@@ -827,6 +827,12 @@ b8 ui_input_text(const char *label, char *text, u32 max_size)
     input_box_state_t state;
     hashtable_get(&ui.input_box_state, label, &state);
 
+    if (state.cursor_offset > num_chars) {
+        state.text_offset = 0;
+        state.cursor_offset = num_chars;
+        hashtable_set(&ui.input_box_state, label, &state);
+    }
+
     if (state.content_flushed_last_frame) {
         mem_zero(text, max_size);
         num_chars = 0;

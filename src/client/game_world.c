@@ -334,7 +334,7 @@ b8 game_world_key_pressed_event_callback(event_code_e code, event_data_t data)
     if (key == KEYCODE_G) {
         show_grid_coords = !show_grid_coords;
         return true;
-    } else if (key == KEYCODE_P) {
+    } else if (key == KEYCODE_N) {
         show_perlin_noise_textures = !show_perlin_noise_textures;
         return true;
     }

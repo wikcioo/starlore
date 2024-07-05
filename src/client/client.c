@@ -59,15 +59,23 @@ static char input_buffer[INPUT_BUFFER_SIZE] = {0};
 static u32 input_count = 0;
 
 static b8 running = false;
+static b8 connected = false;
+static b8 just_disconnected = false;
 
 static vec2 mouse_position;
 
 static b8 game_world_initialized = false;
 static game_world_t game_world;
 
+static pthread_t network_thread;
+
 // Renderer stats are displayed on the UI, which means that in order to display
 // all the information (including UI renderer calls) it needs to show previous frame's stats
 static renderer_stats_t prev_frame_renderer_stats;
+
+static b8   client_attempt_connection(const char *ip, const char *port);
+static void client_init_game_resources(void);
+static void client_shutdown_game_resources(void);
 
 #if defined(DEBUG)
 static b8 ui_debug_info_visible = true;
@@ -452,7 +460,7 @@ static void handle_socket_event(void)
 
 static void *handle_networking(void *args)
 {
-    while (running) {
+    while (connected) {
         i32 num_events = poll(pfds, POLLFD_COUNT, POLL_INFINITE_TIMEOUT);
 
         if (num_events == -1) {
@@ -487,28 +495,45 @@ static void *handle_networking(void *args)
 static b8 key_pressed_event_callback(event_code_e code, event_data_t data)
 {
     u16 key = data.u16[0];
-    if (key == KEYCODE_P) {
-        send_ping_packet();
-        return true;
-    } else if (key == KEYCODE_Escape) {
-        window_set_cursor_state(false);
-        return true;
-    } else if (key == KEYCODE_Y) {
-        is_camera_locked_on_player = !is_camera_locked_on_player;
-        if (is_camera_locked_on_player) {
-            camera_set_position(&game_camera, self_player.base.position);
+    if (game_world_initialized) {
+        if (key == KEYCODE_P) {
+            send_ping_packet();
+            return true;
+        } else if (key == KEYCODE_Escape) {
+            window_set_cursor_state(false);
+            return true;
+        } else if (key == KEYCODE_Y) {
+            is_camera_locked_on_player = !is_camera_locked_on_player;
+            if (is_camera_locked_on_player) {
+                camera_set_position(&game_camera, self_player.base.position);
+            }
+            return true;
         }
-        return true;
-    }
 #if defined(DEBUG)
-    else if (key == KEYCODE_F1) {
-        ui_debug_info_visible = !ui_debug_info_visible;
-        return true;
-    } else if (key == KEYCODE_F2) {
-        ui_test_panel_visible = !ui_test_panel_visible;
-        return true;
-    }
+        else if (key == KEYCODE_F1) {
+            ui_debug_info_visible = !ui_debug_info_visible;
+            return true;
+        } else if (key == KEYCODE_F2) {
+            ui_test_panel_visible = !ui_test_panel_visible;
+            return true;
+        }
 #endif
+    } else {
+#if defined(DEBUG)
+        if (key == KEYCODE_C) {
+            static char *debug_ip = "127.0.0.1";
+            static char *debug_port = "8888";
+            if (client_attempt_connection(debug_ip, debug_port)) {
+                connected = true;
+                client_init_game_resources();
+                pthread_create(&network_thread, NULL, handle_networking, NULL);
+            } else {
+                LOG_ERROR("attempt at connecting to %s:%s failed", debug_ip, debug_port);
+            }
+            return true;
+        }
+#endif
+    }
 
     return false;
 }
@@ -550,10 +575,13 @@ static b8 window_closed_event_callback(event_code_e code, event_data_t data)
 static b8 window_resized_event_callback(event_code_e code, event_data_t data)
 {
     camera_recalculate_projection(&ui_camera);
-    camera_recalculate_projection(&game_camera);
 
-    if (is_camera_locked_on_player) {
-        camera_set_position(&game_camera, self_player.base.position);
+    if (game_world_initialized) {
+        camera_recalculate_projection(&game_camera);
+
+        if (is_camera_locked_on_player) {
+            camera_set_position(&game_camera, self_player.base.position);
+        }
     }
 
     return false;
@@ -571,7 +599,9 @@ static b8 game_world_init_callback(event_code_e code, event_data_t data)
 
 static void signal_handler(i32 sig)
 {
-    running = false;
+    if (sig == SIGINT) {
+        running = false;
+    }
 }
 
 static void display_build_version(void)
@@ -591,7 +621,7 @@ static void display_debug_info(f64 delta_time)
 {
     static ui_window_config_t debug_window_conf = {
         .position  = (vec2){ .x =   5, .y =  30 },
-        .size      = (vec2){ .x = 200, .y = 420 },
+        .size      = (vec2){ .x = 200, .y = 440 },
         .draggable = true,
         .resizable = false,
         .font_size = FA16,
@@ -676,6 +706,12 @@ static void display_debug_info(f64 delta_time)
     static b8 line_mode = false;
     if (ui_checkbox("line mode", &line_mode)) {
         renderer_set_polygon_mode(line_mode ? POLYGON_MODE_LINE : POLYGON_MODE_FILL);
+    }
+
+    if (ui_button("disconnect client")) {
+        connected = false;
+        just_disconnected = true;
+        game_world_initialized = false;
     }
 
     ui_end();
@@ -836,40 +872,18 @@ static void check_camera_movement(f64 delta_time)
     }
 }
 
-int main(int argc, char *argv[])
+static b8 client_attempt_connection(const char *ip, const char *port)
 {
-    if (argc != 4) {
-        LOG_FATAL("usage: %s ip port username", argv[0]);
-        exit(EXIT_FAILURE);
-    }
-
-    mem_copy(username, argv[3], strlen(argv[3]));
-
-    if (!window_create(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT, "StarLore")) {
-        LOG_ERROR("failed to create window");
-        exit(EXIT_FAILURE);
-    }
-
-    if (!event_system_init()) {
-        LOG_ERROR("failed to initialize event system");
-        exit(EXIT_FAILURE);
-    }
-
-    if (!renderer_init()) {
-        LOG_ERROR("failed to initialize renderer");
-        exit(EXIT_FAILURE);
-    }
-
     struct addrinfo hints, *result, *rp;
     mem_zero(&hints, sizeof(hints));
 
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
 
-    i32 status_code = getaddrinfo(argv[1], argv[2], &hints, &result);
+    i32 status_code = getaddrinfo(ip, port, &hints, &result);
     if (status_code != 0) {
         LOG_FATAL("getaddrinfo error: %s", gai_strerror(status_code));
-        exit(EXIT_FAILURE);
+        return false;
     }
 
     for (rp = result; rp != NULL; rp = rp->ai_next) {
@@ -891,10 +905,18 @@ int main(int argc, char *argv[])
 
     if (rp == NULL) {
         LOG_FATAL("failed to connect");
-        exit(EXIT_FAILURE);
+        return false;
     }
 
-    LOG_INFO("connected to server at %s:%s", argv[1], argv[2]);
+    LOG_INFO("connected to server at %s:%s", ip, port);
+
+    if (!handle_client_validation(client_socket)) {
+        LOG_FATAL("failed client validation");
+        close(client_socket);
+        return false;
+    }
+
+    LOG_INFO("client successfully validated");
 
     pfds[0].fd = STDIN_FILENO;
     pfds[0].events = POLLIN;
@@ -902,145 +924,42 @@ int main(int argc, char *argv[])
     pfds[1].fd = client_socket;
     pfds[1].events = POLLIN;
 
-    if (!handle_client_validation(client_socket)) {
-        LOG_FATAL("failed client validation");
-        close(client_socket);
-        exit(EXIT_FAILURE);
-    }
-
-    LOG_INFO("client successfully validated");
-
-    running = true;
-
     struct sigaction sa;
     sa.sa_flags = SA_RESTART; // Restart functions interruptable by EINTR like poll()
     sa.sa_handler = &signal_handler;
     sigaction(SIGINT, &sa, NULL);
-
-    camera_create(&ui_camera, vec2_zero());
-    camera_create(&game_camera, vec2_zero());
-
-    ui_init();
-    chat_init();
-    player_load_animations();
-
-    // NOTE: order of registration is important
-    event_system_register(EVENT_CODE_MOUSE_BUTTON_PRESSED,  ui_mouse_button_pressed_event_callback);
-    event_system_register(EVENT_CODE_MOUSE_BUTTON_RELEASED, ui_mouse_button_released_event_callback);
-    event_system_register(EVENT_CODE_MOUSE_MOVED,           ui_mouse_moved_event_callback);
-    event_system_register(EVENT_CODE_MOUSE_SCROLLED,        ui_mouse_scrolled_event_callback);
-    event_system_register(EVENT_CODE_CHAR_PRESSED,          ui_char_pressed_event_callback);
-    event_system_register(EVENT_CODE_KEY_PRESSED,           ui_key_pressed_event_callback);
-    event_system_register(EVENT_CODE_KEY_REPEATED,          ui_key_repeated_event_callback);
-
-    event_system_register(EVENT_CODE_CHAR_PRESSED, chat_char_pressed_event_callback);
-    event_system_register(EVENT_CODE_KEY_PRESSED,  chat_key_pressed_event_callback);
-    event_system_register(EVENT_CODE_KEY_REPEATED, chat_key_repeated_event_callback);
-
-    event_system_register(EVENT_CODE_KEY_PRESSED, player_key_pressed_event_callback);
-    event_system_register(EVENT_CODE_KEY_RELEASED, player_key_released_event_callback);
-
-    event_system_register(EVENT_CODE_KEY_PRESSED, game_world_key_pressed_event_callback);
-
-    event_system_register(EVENT_CODE_KEY_PRESSED, key_pressed_event_callback);
-
-    event_system_register(EVENT_CODE_MOUSE_BUTTON_PRESSED, chat_mouse_button_pressed_event_callback);
-    event_system_register(EVENT_CODE_MOUSE_BUTTON_PRESSED, mouse_button_pressed_event_callback);
-    event_system_register(EVENT_CODE_MOUSE_MOVED, mouse_moved_event_callback);
-    event_system_register(EVENT_CODE_MOUSE_SCROLLED, mouse_scrolled_event_callback);
-
-    event_system_register(EVENT_CODE_WINDOW_CLOSED, window_closed_event_callback);
-    event_system_register(EVENT_CODE_WINDOW_RESIZED, window_resized_event_callback);
-    event_system_register(EVENT_CODE_WINDOW_RESIZED, chat_window_resized_event_callback);
-    event_system_register(EVENT_CODE_GAME_WORLD_INIT, game_world_init_callback);
-
-    pthread_t network_thread;
-    pthread_create(&network_thread, NULL, handle_networking, NULL);
-
-    f64 last_time = glfwGetTime();
-    f64 delta_time = 0.0f;
-
-    f64 client_update_accumulator = 0.0f;
+    sigaction(SIGUSR1, &sa, NULL);
 
     LOG_INFO("server tick rate: %u", SERVER_TICK_RATE);
 
-    while (running) {
-        f64 now = glfwGetTime();
-        delta_time = now - last_time;
-        last_time = now;
-        net_update(delta_time);
+    return true;
+}
 
-        event_system_poll_events();
-        check_camera_movement(delta_time);
+static void client_init_game_resources(void)
+{
+    event_system_register(EVENT_CODE_CHAR_PRESSED,         chat_char_pressed_event_callback);
+    event_system_register(EVENT_CODE_KEY_PRESSED,          chat_key_pressed_event_callback);
+    event_system_register(EVENT_CODE_KEY_REPEATED,         chat_key_repeated_event_callback);
+    event_system_register(EVENT_CODE_MOUSE_BUTTON_PRESSED, chat_mouse_button_pressed_event_callback);
+    event_system_register(EVENT_CODE_WINDOW_RESIZED,       chat_window_resized_event_callback);
 
-        server_update_accumulator += delta_time;
-        client_update_accumulator += delta_time;
+    event_system_register(EVENT_CODE_KEY_PRESSED,  player_key_pressed_event_callback);
+    event_system_register(EVENT_CODE_KEY_RELEASED, player_key_released_event_callback);
 
-        if (client_update_accumulator >= CLIENT_TICK_DURATION) {
-            player_self_update(&self_player, CLIENT_TICK_DURATION);
-            client_update_accumulator = 0.0f;
-        }
+    event_system_register(EVENT_CODE_KEY_PRESSED,     game_world_key_pressed_event_callback);
+    event_system_register(EVENT_CODE_GAME_WORLD_INIT, game_world_init_callback);
 
-        renderer_reset_stats();
-        renderer_clear_screen(vec4_create(0.3f, 0.3f, 0.3f, 1.0f));
+    event_system_register(EVENT_CODE_MOUSE_BUTTON_PRESSED, mouse_button_pressed_event_callback);
+    event_system_register(EVENT_CODE_MOUSE_SCROLLED,       mouse_scrolled_event_callback);
 
-        // Start of game rendering
-        renderer_begin_scene(&game_camera);
+    camera_create(&game_camera, vec2_zero());
 
-        if (game_world_initialized) {
-            game_world_render(&game_world, &game_camera);
-        }
+    chat_init();
+    player_load_animations();
+}
 
-        // Render all other players
-        for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
-            if (remote_players[i].base.id != PLAYER_INVALID_ID) {
-                player_remote_render(&remote_players[i], delta_time, server_update_accumulator);
-            }
-        }
-
-        // Render ourselves
-        if (self_player.base.id != PLAYER_INVALID_ID) {
-            player_self_render(&self_player, delta_time);
-        }
-
-        renderer_end_scene();
-
-        // Start of UI rendering
-        renderer_begin_scene(&ui_camera);
-
-        chat_render();
-        display_build_version();
-
-        char health_buffer[16];
-        snprintf(health_buffer, sizeof(health_buffer), "Health: %d", self_player.base.health);
-        f32 corner_padding = 10.0f;
-        vec2 health_position = vec2_create(
-            main_window_size.x / 2.0f - (renderer_get_font_width(FA32) * strlen(health_buffer)) - corner_padding,
-            main_window_size.y / 2.0f - renderer_get_font_height(FA32) - corner_padding
-        );
-        renderer_draw_text(health_buffer, FA32, health_position, 1.0f, COLOR_MILK, 1.0f);
-
-        renderer_end_scene();
-
-#if defined(DEBUG)
-        ui_begin_frame();
-
-        if (ui_debug_info_visible) {
-            display_debug_info(delta_time);
-        }
-        if (ui_test_panel_visible) {
-            display_ui_test_panel();
-        }
-
-        ui_end_frame();
-#endif
-
-        mem_copy(&prev_frame_renderer_stats, &renderer_stats, sizeof(renderer_stats));
-
-        window_poll_events();
-        window_swap_buffers();
-    }
-
+static void client_shutdown_game_resources(void)
+{
     LOG_INFO("client shutting down");
 
     // Tell server to remove ourselves from the player list
@@ -1054,6 +973,212 @@ int main(int argc, char *argv[])
     LOG_INFO("removed self from players");
     player_self_destroy(&self_player);
 
+    event_system_unregister(EVENT_CODE_CHAR_PRESSED,         chat_char_pressed_event_callback);
+    event_system_unregister(EVENT_CODE_KEY_PRESSED,          chat_key_pressed_event_callback);
+    event_system_unregister(EVENT_CODE_KEY_REPEATED,         chat_key_repeated_event_callback);
+    event_system_unregister(EVENT_CODE_MOUSE_BUTTON_PRESSED, chat_mouse_button_pressed_event_callback);
+    event_system_unregister(EVENT_CODE_WINDOW_RESIZED,       chat_window_resized_event_callback);
+
+    event_system_unregister(EVENT_CODE_KEY_PRESSED,  player_key_pressed_event_callback);
+    event_system_unregister(EVENT_CODE_KEY_RELEASED, player_key_released_event_callback);
+
+    event_system_unregister(EVENT_CODE_KEY_PRESSED,     game_world_key_pressed_event_callback);
+    event_system_unregister(EVENT_CODE_GAME_WORLD_INIT, game_world_init_callback);
+
+    event_system_unregister(EVENT_CODE_MOUSE_BUTTON_PRESSED, mouse_button_pressed_event_callback);
+    event_system_unregister(EVENT_CODE_MOUSE_SCROLLED,       mouse_scrolled_event_callback);
+
+    chat_shutdown();
+
+    pthread_kill(network_thread, SIGUSR1);
+    pthread_join(network_thread, NULL);
+}
+
+static void run_connected_client(f64 delta_time)
+{
+    static f64 client_update_accumulator = 0.0f;
+
+    check_camera_movement(delta_time);
+
+    server_update_accumulator += delta_time;
+    client_update_accumulator += delta_time;
+
+    if (client_update_accumulator >= CLIENT_TICK_DURATION) {
+        player_self_update(&self_player, CLIENT_TICK_DURATION);
+        client_update_accumulator = 0.0f;
+    }
+
+    renderer_reset_stats();
+    renderer_clear_screen(vec4_create(0.3f, 0.3f, 0.3f, 1.0f));
+
+    // Start of game rendering
+    renderer_begin_scene(&game_camera);
+
+    if (game_world_initialized) {
+        game_world_render(&game_world, &game_camera);
+    }
+
+    // Render all other players
+    for (i32 i = 0; i < MAX_PLAYER_COUNT; i++) {
+        if (remote_players[i].base.id != PLAYER_INVALID_ID) {
+            player_remote_render(&remote_players[i], delta_time, server_update_accumulator);
+        }
+    }
+
+    // Render ourselves
+    if (self_player.base.id != PLAYER_INVALID_ID) {
+        player_self_render(&self_player, delta_time);
+    }
+
+    renderer_end_scene();
+
+    // Start of UI rendering
+    renderer_begin_scene(&ui_camera);
+
+    chat_render();
+    display_build_version();
+
+    char health_buffer[16];
+    snprintf(health_buffer, sizeof(health_buffer), "Health: %d", self_player.base.health);
+    f32 corner_padding = 10.0f;
+    vec2 health_position = vec2_create(
+        main_window_size.x / 2.0f - (renderer_get_font_width(FA32) * strlen(health_buffer)) - corner_padding,
+        main_window_size.y / 2.0f - renderer_get_font_height(FA32) - corner_padding
+    );
+    renderer_draw_text(health_buffer, FA32, health_position, 1.0f, COLOR_MILK, 1.0f);
+
+    renderer_end_scene();
+
+#if defined(DEBUG)
+    ui_begin_frame();
+
+    if (ui_debug_info_visible) {
+        display_debug_info(delta_time);
+    }
+    if (ui_test_panel_visible) {
+        display_ui_test_panel();
+    }
+
+    ui_end_frame();
+#endif
+
+    mem_copy(&prev_frame_renderer_stats, &renderer_stats, sizeof(renderer_stats));
+}
+
+static void run_disconnected_client(f64 delta_time)
+{
+    static vec2 ui_window_size = (vec2){ .x = 600, .y = 200 };
+    renderer_clear_screen(vec4_create(0.8f, 0.5f, 0.3f, 1.0f));
+
+    ui_begin_frame();
+    {
+        ui_window_config_t config = {
+            .position = (vec2){
+                .x = main_window_size.x * 0.5f - ui_window_size.x * 0.5f,
+                .y = main_window_size.y * 0.5f - ui_window_size.y * 0.5f
+            },
+            .size = ui_window_size,
+            .draggable = true,
+            .resizable = true,
+            .font_size = FA64
+        };
+
+        static b8 is_open = true;
+        ui_begin_conf("connect to server", &config, &is_open);
+
+        static char ip_addr_buf[15+1] = {0};
+        ui_input_text("ip address", ip_addr_buf, ARRAY_SIZE(ip_addr_buf));
+
+        static char port_buf[5+1] = {0};
+        ui_input_text("      port", port_buf, ARRAY_SIZE(port_buf));
+
+        if (ui_button("connect")) {
+            if (client_attempt_connection(ip_addr_buf, port_buf)) {
+                mem_zero(ip_addr_buf, ARRAY_SIZE(ip_addr_buf));
+                mem_zero(port_buf, ARRAY_SIZE(port_buf));
+                connected = true;
+                client_init_game_resources();
+                pthread_create(&network_thread, NULL, handle_networking, NULL);
+            } else {
+                LOG_ERROR("attempt at connecting to %s:%s failed", ip_addr_buf, port_buf);
+            }
+        }
+
+        ui_end();
+    }
+    ui_end_frame();
+}
+
+int main(int argc, char *argv[])
+{
+    if (argc != 2) {
+        LOG_FATAL("usage: %s username", argv[0]);
+        exit(EXIT_FAILURE);
+    }
+
+    mem_copy(username, argv[1], strlen(argv[1]));
+
+    if (!window_create(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT, "StarLore")) {
+        LOG_ERROR("failed to create window");
+        exit(EXIT_FAILURE);
+    }
+
+    if (!event_system_init()) {
+        LOG_ERROR("failed to initialize event system");
+        exit(EXIT_FAILURE);
+    }
+
+    if (!renderer_init()) {
+        LOG_ERROR("failed to initialize renderer");
+        exit(EXIT_FAILURE);
+    }
+
+    event_system_register(EVENT_CODE_MOUSE_BUTTON_PRESSED,  ui_mouse_button_pressed_event_callback);
+    event_system_register(EVENT_CODE_MOUSE_BUTTON_RELEASED, ui_mouse_button_released_event_callback);
+    event_system_register(EVENT_CODE_MOUSE_MOVED,           ui_mouse_moved_event_callback);
+    event_system_register(EVENT_CODE_MOUSE_SCROLLED,        ui_mouse_scrolled_event_callback);
+    event_system_register(EVENT_CODE_CHAR_PRESSED,          ui_char_pressed_event_callback);
+    event_system_register(EVENT_CODE_KEY_PRESSED,           ui_key_pressed_event_callback);
+    event_system_register(EVENT_CODE_KEY_REPEATED,          ui_key_repeated_event_callback);
+
+    event_system_register(EVENT_CODE_KEY_PRESSED,    key_pressed_event_callback);
+    event_system_register(EVENT_CODE_MOUSE_MOVED,    mouse_moved_event_callback);
+    event_system_register(EVENT_CODE_WINDOW_CLOSED,  window_closed_event_callback);
+    event_system_register(EVENT_CODE_WINDOW_RESIZED, window_resized_event_callback);
+
+    camera_create(&ui_camera, vec2_zero());
+    ui_init();
+
+    f64 last_time = glfwGetTime();
+    f64 delta_time = 0.0f;
+
+    running = true;
+    while (running) {
+        f64 now = glfwGetTime();
+        delta_time = now - last_time;
+        last_time = now;
+        net_update(delta_time);
+
+        if (connected) {
+            run_connected_client(delta_time);
+        } else {
+            run_disconnected_client(delta_time);
+            if (just_disconnected) {
+                client_shutdown_game_resources();
+                just_disconnected = false;
+            }
+        }
+
+        window_poll_events();
+        window_swap_buffers();
+
+        event_system_poll_events();
+    }
+
+    if (connected) {
+        client_shutdown_game_resources();
+    }
+
     event_system_unregister(EVENT_CODE_MOUSE_BUTTON_PRESSED,  ui_mouse_button_pressed_event_callback);
     event_system_unregister(EVENT_CODE_MOUSE_BUTTON_RELEASED, ui_mouse_button_released_event_callback);
     event_system_unregister(EVENT_CODE_MOUSE_MOVED,           ui_mouse_moved_event_callback);
@@ -1062,37 +1187,17 @@ int main(int argc, char *argv[])
     event_system_unregister(EVENT_CODE_KEY_PRESSED,           ui_key_pressed_event_callback);
     event_system_unregister(EVENT_CODE_KEY_REPEATED,          ui_key_repeated_event_callback);
 
-    event_system_unregister(EVENT_CODE_CHAR_PRESSED, chat_char_pressed_event_callback);
-    event_system_unregister(EVENT_CODE_KEY_PRESSED, chat_key_pressed_event_callback);
-    event_system_unregister(EVENT_CODE_KEY_REPEATED, chat_key_repeated_event_callback);
-
-    event_system_unregister(EVENT_CODE_KEY_PRESSED, player_key_pressed_event_callback);
-    event_system_unregister(EVENT_CODE_KEY_RELEASED, player_key_released_event_callback);
-
-    event_system_unregister(EVENT_CODE_KEY_PRESSED, game_world_key_pressed_event_callback);
-
-    event_system_unregister(EVENT_CODE_KEY_PRESSED, key_pressed_event_callback);
-
-    event_system_unregister(EVENT_CODE_MOUSE_BUTTON_PRESSED, chat_mouse_button_pressed_event_callback);
-    event_system_unregister(EVENT_CODE_MOUSE_BUTTON_PRESSED, mouse_button_pressed_event_callback);
-    event_system_unregister(EVENT_CODE_MOUSE_MOVED, mouse_moved_event_callback);
-    event_system_unregister(EVENT_CODE_MOUSE_SCROLLED, mouse_scrolled_event_callback);
-
-    event_system_unregister(EVENT_CODE_WINDOW_CLOSED, window_closed_event_callback);
+    event_system_unregister(EVENT_CODE_KEY_PRESSED,    key_pressed_event_callback);
+    event_system_unregister(EVENT_CODE_MOUSE_MOVED,    mouse_moved_event_callback);
+    event_system_unregister(EVENT_CODE_WINDOW_CLOSED,  window_closed_event_callback);
     event_system_unregister(EVENT_CODE_WINDOW_RESIZED, window_resized_event_callback);
-    event_system_unregister(EVENT_CODE_WINDOW_RESIZED, chat_window_resized_event_callback);
-    event_system_unregister(EVENT_CODE_GAME_WORLD_INIT, game_world_init_callback);
 
     ui_shutdown();
-    chat_shutdown();
     renderer_shutdown();
     event_system_shutdown();
 
     LOG_INFO("destroying main window");
     window_destroy();
-
-    pthread_kill(network_thread, SIGINT);
-    pthread_join(network_thread, NULL);
 
     return EXIT_SUCCESS;
 }
