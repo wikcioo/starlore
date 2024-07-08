@@ -2,6 +2,9 @@
 
 #include "defines.h"
 
+typedef u32 player_id;
+typedef u8 tile_type_t;
+
 #define CLIENT_TICK_RATE 64
 #define CLIENT_TICK_DURATION (1.0f / CLIENT_TICK_RATE)
 #define SERVER_TICK_RATE 64
@@ -26,4 +29,15 @@
 
 #define MESSAGE_MAX_CONTENT_LENGTH 256
 
-typedef u32 player_id;
+#define CHUNK_LENGTH    16
+#define CHUNK_WIDTH_PX  (CHUNK_LENGTH * TILE_WIDTH_PX)
+#define CHUNK_HEIGHT_PX (CHUNK_LENGTH * TILE_HEIGHT_PX)
+#define CHUNK_NUM_TILES (CHUNK_LENGTH * CHUNK_LENGTH)
+
+typedef struct {
+    i32 x, y;
+    tile_type_t tiles[CHUNK_NUM_TILES];
+#if defined(DEBUG)
+    f32 noise_data[CHUNK_NUM_TILES];
+#endif
+} chunk_base_t;

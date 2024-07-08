@@ -56,6 +56,11 @@ typedef enum {
 
     EVENT_CODE_GAME_WORLD_INIT,
 
+    // data usage:
+    //   u64 packet_memory_addr = data.u64[0]
+    //   NOTE: receiver has to free the memory themselves
+    EVENT_CODE_CHUNK_RECEIVED,
+
     EVENT_CODE_COUNT
 } event_code_e;
 

@@ -42,7 +42,7 @@
 
 #define POLLFD_COUNT 2
 #define INPUT_BUFFER_SIZE 4096
-#define OVERFLOW_BUFFER_SIZE 1024
+#define OVERFLOW_BUFFER_SIZE 2048
 #define POLL_INFINITE_TIMEOUT -1
 
 extern vec2 main_window_size;
@@ -438,11 +438,12 @@ static void handle_socket_event(void)
                 game_world_init(game_world_init_packet, &game_world);
                 event_system_fire(EVENT_CODE_GAME_WORLD_INIT, (event_data_t){0});
             } break;
-            case PACKET_TYPE_GAME_WORLD_OBJECT_ADD: {
-                received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_GAME_WORLD_OBJECT_ADD];
-                packet_world_object_add_t *world_object_add_packet = (packet_world_object_add_t *)(buffer + PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]);
-
-                game_world_add_objects(&game_world, world_object_add_packet->objects, world_object_add_packet->length);
+            case PACKET_TYPE_CHUNK_RESPONSE: {
+                received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_CHUNK_RESPONSE];
+                packet_chunk_response_t *response = (packet_chunk_response_t *)(buffer + PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]);
+                void *packet_memory_addr = mem_alloc(sizeof(packet_chunk_response_t), MEMORY_TAG_NETWORK);
+                mem_copy(packet_memory_addr, response, sizeof(packet_chunk_response_t));
+                event_system_fire(EVENT_CODE_CHUNK_RECEIVED, (event_data_t){ .u64[0] = (u64)packet_memory_addr });
             } break;
             default:
                 LOG_WARN("received unknown packet type, ignoring...");
@@ -594,7 +595,17 @@ static b8 game_world_init_callback(event_code_e code, event_data_t data)
     game_world_load_resources(&game_world);
     game_world_initialized = true;
     LOG_TRACE("game world resources loaded");
-    return false;
+    return true;
+}
+
+// Event fired after receiving CHUNK_RESPONSE packet
+// Made as event callback so that resources are created in the main thread with OpenGL context
+static b8 game_world_chunk_received_callback(event_code_e code, event_data_t data)
+{
+    packet_chunk_response_t *response = (packet_chunk_response_t *)data.u64[0];
+    game_world_add_chunk(&response->chunk, &game_camera);
+    mem_free((void *)response, sizeof(packet_chunk_response_t), MEMORY_TAG_NETWORK);
+    return true;
 }
 
 static void signal_handler(i32 sig)
@@ -621,7 +632,7 @@ static void display_debug_info(f64 delta_time)
 {
     static ui_window_config_t debug_window_conf = {
         .position  = (vec2){ .x =   5, .y =  30 },
-        .size      = (vec2){ .x = 200, .y = 440 },
+        .size      = (vec2){ .x = 200, .y = 480 },
         .draggable = true,
         .resizable = false,
         .font_size = FA16,
@@ -694,6 +705,9 @@ static void display_debug_info(f64 delta_time)
 
         const char *unit = get_size_unit(chunk_mem_usage, &chunk_mem_usage_formatted);
         snprintf(buffer, sizeof(buffer), "chunks in cache\n  count: %llu\n  mem usage: %.02f %s", chunks_count, chunk_mem_usage_formatted, unit);
+        ui_text(buffer);
+
+        snprintf(buffer, sizeof(buffer), "game world map data\n  seed: %u\n  octaves: %i\n  bias: %.02f", game_world.map.seed, game_world.map.octave_count, game_world.map.bias);
         ui_text(buffer);
     }
 
@@ -948,6 +962,7 @@ static void client_init_game_resources(void)
 
     event_system_register(EVENT_CODE_KEY_PRESSED,     game_world_key_pressed_event_callback);
     event_system_register(EVENT_CODE_GAME_WORLD_INIT, game_world_init_callback);
+    event_system_register(EVENT_CODE_CHUNK_RECEIVED,  game_world_chunk_received_callback);
 
     event_system_register(EVENT_CODE_MOUSE_BUTTON_PRESSED, mouse_button_pressed_event_callback);
     event_system_register(EVENT_CODE_MOUSE_SCROLLED,       mouse_scrolled_event_callback);
@@ -984,6 +999,7 @@ static void client_shutdown_game_resources(void)
 
     event_system_unregister(EVENT_CODE_KEY_PRESSED,     game_world_key_pressed_event_callback);
     event_system_unregister(EVENT_CODE_GAME_WORLD_INIT, game_world_init_callback);
+    event_system_unregister(EVENT_CODE_CHUNK_RECEIVED,  game_world_chunk_received_callback);
 
     event_system_unregister(EVENT_CODE_MOUSE_BUTTON_PRESSED, mouse_button_pressed_event_callback);
     event_system_unregister(EVENT_CODE_MOUSE_SCROLLED,       mouse_scrolled_event_callback);

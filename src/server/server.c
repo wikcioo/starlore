@@ -12,6 +12,7 @@
 #include <signal.h>
 #include <pthread.h>
 
+#include "config.h"
 #include "defines.h"
 #include "common/net.h"
 #include "common/clock.h"
@@ -24,6 +25,7 @@
 #include "common/input_codes.h"
 #include "common/perlin_noise.h"
 #include "common/game_world_types.h"
+#include "common/memory/memutils.h"
 #include "common/containers/darray.h"
 #include "common/containers/ring_buffer.h"
 
@@ -80,6 +82,9 @@ static void *input_ring_buffer;
 static message_t *messages;
 
 static game_world_t game_world;
+static chunk_base_t *chunks;
+
+static void generate_chunk(i32 x, i32 y, chunk_base_t **out_chunk);
 
 void server_pfd_init(u32 initial_capacity, server_pfd_t *out_server_pfd)
 {
@@ -568,6 +573,47 @@ void handle_packet_type(i32 client_socket, u8 *packet_body_buffer, u32 type, u32
                 LOG_ERROR("failed to enqueue new player input");
             }
         } break;
+        case PACKET_TYPE_CHUNK_REQUEST: {
+            received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_CHUNK_REQUEST];
+            packet_chunk_request_t *request = (packet_chunk_request_t *)packet_body_buffer;
+
+            b8 found_chunk = false;
+            u64 chunks_length = darray_length(chunks);
+            for (u64 i = 0; i < chunks_length; i++) {
+                chunk_base_t *chunk = &chunks[i];
+                if (chunk->x == request->x && chunk->y == request->y) {
+                    packet_chunk_response_t response = { .chunk = *chunk };
+                    if (!packet_send(client_socket, PACKET_TYPE_CHUNK_RESPONSE, &response)) {
+                        LOG_ERROR("failed to send chunk response packet to player with socket=%u", client_socket);
+                    } 
+#if LOG_CHUNK_TRANSACTIONS
+                    else {
+                        LOG_TRACE("sent cached chunk %i:%i", request->x, request->y);
+                    }
+#endif
+                    found_chunk = true;
+                    break;
+                }
+            }
+            
+            if (!found_chunk) {
+#if LOG_CHUNK_TRANSACTIONS
+                LOG_TRACE("requested chunk %i:%i but did not find in cache, generating...", request->x, request->y);
+#endif
+                chunk_base_t *new_chunk;
+                generate_chunk(request->x, request->y, &new_chunk);
+
+                packet_chunk_response_t response = { .chunk = *new_chunk };
+                if (!packet_send(client_socket, PACKET_TYPE_CHUNK_RESPONSE, &response)) {
+                    LOG_ERROR("failed to send chunk response packet to player with socket=%u", client_socket);
+                }
+#if LOG_CHUNK_TRANSACTIONS
+                else {
+                    LOG_TRACE("sent newly generated chunk %i:%i", request->x, request->y);
+                }
+#endif
+            }
+        } break;
         default:
             LOG_WARN("received unknown packet type, ignoring...");
     }
@@ -976,6 +1022,53 @@ void *process_input_queue(void *args)
     return NULL;
 }
 
+static void generate_chunk(i32 x, i32 y, chunk_base_t **out_chunk)
+{
+    f32 *perlin_noise_data = mem_alloc(CHUNK_NUM_TILES * sizeof(f32), MEMORY_TAG_GAME);
+
+    perlin_noise_config_t config = {
+        .pos_x = x * CHUNK_LENGTH,
+        .pos_y = y * CHUNK_LENGTH,
+        .width = CHUNK_LENGTH,
+        .height = CHUNK_LENGTH,
+        .seed = game_world.map.seed,
+        .octave_count = game_world.map.octave_count,
+        .scaling_bias = game_world.map.bias
+    };
+
+    perlin_noise_generate_2d(config, perlin_noise_data);
+
+    chunk_base_t new_chunk = {0};
+    new_chunk.x = x;
+    new_chunk.y = y;
+#if defined(DEBUG)
+    memcpy(new_chunk.noise_data, perlin_noise_data, CHUNK_NUM_TILES * sizeof(f32));
+#endif
+
+    for (u32 i = 0; i < CHUNK_NUM_TILES; i++) {
+        tile_type_t tile_type = TILE_TYPE_NONE;
+        f32 value = perlin_noise_data[i];
+        if (value < 0.4f) {
+            tile_type = TILE_TYPE_WATER;
+        } else if (value < 0.45f) {
+            tile_type = TILE_TYPE_DIRT;
+        } else if (value < 0.8f) {
+            tile_type = TILE_TYPE_GRASS;
+        } else {
+            tile_type = TILE_TYPE_STONE;
+        }
+
+        ASSERT(tile_type > TILE_TYPE_NONE && tile_type < TILE_TYPE_COUNT);
+        new_chunk.tiles[i] = tile_type;
+    }
+
+    u64 chunks_length = darray_length(chunks);
+    darray_push(chunks, new_chunk);
+    *out_chunk = &chunks[chunks_length];
+
+    mem_free(perlin_noise_data, CHUNK_NUM_TILES * sizeof(f32), MEMORY_TAG_GAME);
+}
+
 int main(int argc, char *argv[])
 {
     if (argc != 2) {
@@ -1055,45 +1148,7 @@ int main(int argc, char *argv[])
     game_world.map.bias = 2.0f;
     game_world.objects = darray_create(sizeof(game_object_t));
 
-#if 0
-    f32 *perlin_noise_data = malloc(game_world.map.width * game_world.map.height * sizeof(f32));
-
-    perlin_noise_config_t config = {
-        .width = game_world.map.width,
-        .height = game_world.map.height,
-        .seed = game_world.map.seed,
-        .octave_count = game_world.map.octave_count,
-        .scaling_bias = game_world.map.bias
-    };
-
-    perlin_noise_generate_2d(config, perlin_noise_data);
-
-    for (i32 i = 0; i < game_world.map.width * game_world.map.height; i++) {
-        if (perlin_noise_data[i] >= 0.45f && perlin_noise_data[i] < 0.8f) {
-            // Spawn random vegetation on grass tiles
-            f32 r = math_frandom();
-            if (0.0f <= r && r < 0.01f) { // ~1% chance of spawning a bush
-                game_object_t obj = {
-                    .type = GAME_OBJECT_TYPE_BUSH,
-                    .tile_index = i
-                };
-                darray_push(game_world.objects, obj);
-            }
-        } else if (perlin_noise_data[i] < 0.4f) {
-            // Spawn lilies on water tiles
-            f32 r = math_frandom();
-            if (0.0f <= r && r < 0.01f) { // ~1% chance of spawning a lily
-                game_object_t obj = {
-                    .type = GAME_OBJECT_TYPE_LILY,
-                    .tile_index = i
-                };
-                darray_push(game_world.objects, obj);
-            }
-        }
-    }
-
-    free(perlin_noise_data);
-#endif
+    chunks = darray_create(sizeof(chunk_base_t));
 
     struct sigaction sa = {0};
     sa.sa_flags = SA_RESTART; // Restart functions interruptable by EINTR like poll()

@@ -25,6 +25,8 @@ typedef enum {
     PACKET_TYPE_PLAYER_KEYPRESS,
     PACKET_TYPE_GAME_WORLD_INIT,
     PACKET_TYPE_GAME_WORLD_OBJECT_ADD,
+    PACKET_TYPE_CHUNK_REQUEST,
+    PACKET_TYPE_CHUNK_RESPONSE,
     PACKET_TYPE_COUNT
 } packet_type_e;
 
@@ -126,6 +128,14 @@ typedef struct {
     game_object_t objects[MAX_GAME_OBJECTS_TRANSFER];
 } packet_world_object_add_t;
 
+typedef struct {
+    i32 x, y;
+} packet_chunk_request_t;
+
+typedef struct {
+    chunk_base_t chunk;
+} packet_chunk_response_t;
+
 static const u32 PACKET_TYPE_SIZE[PACKET_TYPE_COUNT] = {
     [PACKET_TYPE_NONE]                   = 0,
     [PACKET_TYPE_HEADER]                 = sizeof(packet_header_t),
@@ -142,7 +152,9 @@ static const u32 PACKET_TYPE_SIZE[PACKET_TYPE_COUNT] = {
     [PACKET_TYPE_PLAYER_RESPAWN]         = sizeof(packet_player_respawn_t),
     [PACKET_TYPE_PLAYER_KEYPRESS]        = sizeof(packet_player_keypress_t),
     [PACKET_TYPE_GAME_WORLD_INIT]        = sizeof(packet_game_world_init_t),
-    [PACKET_TYPE_GAME_WORLD_OBJECT_ADD]  = sizeof(packet_world_object_add_t)
+    [PACKET_TYPE_GAME_WORLD_OBJECT_ADD]  = sizeof(packet_world_object_add_t),
+    [PACKET_TYPE_CHUNK_REQUEST]          = sizeof(packet_chunk_request_t),
+    [PACKET_TYPE_CHUNK_RESPONSE]         = sizeof(packet_chunk_response_t)
 };
 
 b8 packet_send(i32 socket, u32 type, void *packet_data);
