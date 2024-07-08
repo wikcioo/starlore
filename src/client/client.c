@@ -41,8 +41,8 @@
 #include "common/containers/ring_buffer.h"
 
 #define POLLFD_COUNT 2
-#define INPUT_BUFFER_SIZE 4096
-#define OVERFLOW_BUFFER_SIZE 2048
+#define INPUT_BUFFER_SIZE 8192
+#define OVERFLOW_BUFFER_SIZE 4096
 #define POLL_INFINITE_TIMEOUT -1
 
 extern vec2 main_window_size;
@@ -216,7 +216,9 @@ static void handle_socket_event(void)
 
         if (bytes_read - PACKET_TYPE_SIZE[PACKET_TYPE_HEADER] < header->size) {
             u64 missing_bytes = header->size - (bytes_read - PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]);
+#if LOG_NETWORK
             LOG_TRACE("not read the entire packet body. reading %lu more", missing_bytes);
+#endif
 
             ASSERT_MSG(missing_bytes <= OVERFLOW_BUFFER_SIZE, "not enough space in overflow buffer. consider increasing the size");
 

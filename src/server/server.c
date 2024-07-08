@@ -335,31 +335,6 @@ void handle_new_player_connection(i32 client_socket)
     if (!packet_send(players[new_player_idx].socket, PACKET_TYPE_GAME_WORLD_INIT, &world_init_packet)) {
         LOG_ERROR("failed to send world init packet");
     }
-
-    // Send game world objects to the new player
-    i32 num_transfers = ((darray_length(game_world.objects) - 1) / MAX_GAME_OBJECTS_TRANSFER) + 1;
-    u64 obj_count = darray_length(game_world.objects);
-    for (i32 i = 0; i < num_transfers; i++) {
-        i32 length;
-        if (obj_count >= MAX_GAME_OBJECTS_TRANSFER) {
-            length = MAX_GAME_OBJECTS_TRANSFER;
-        } else {
-            length = obj_count % MAX_GAME_OBJECTS_TRANSFER;
-        }
-
-        obj_count -= length;
-
-        i32 offset = i * MAX_GAME_OBJECTS_TRANSFER;
-
-        packet_world_object_add_t world_object_add_packet = {0};
-        world_object_add_packet.length = length;
-
-        memcpy(world_object_add_packet.objects, (game_world.objects + offset), length * sizeof(game_object_t));
-
-        if (!packet_send(players[new_player_idx].socket, PACKET_TYPE_GAME_WORLD_OBJECT_ADD, &world_object_add_packet)) {
-            LOG_ERROR("failed to send world add object packet (transfer number: %d)", i);
-        }
-    }
 }
 
 void handle_new_connection_request_event(void)
@@ -1045,6 +1020,7 @@ static void generate_chunk(i32 x, i32 y, chunk_base_t **out_chunk)
     memcpy(new_chunk.noise_data, perlin_noise_data, CHUNK_NUM_TILES * sizeof(f32));
 #endif
 
+    u32 object_count = 0;
     for (u32 i = 0; i < CHUNK_NUM_TILES; i++) {
         tile_type_t tile_type = TILE_TYPE_NONE;
         f32 value = perlin_noise_data[i];
@@ -1059,7 +1035,25 @@ static void generate_chunk(i32 x, i32 y, chunk_base_t **out_chunk)
         }
 
         ASSERT(tile_type > TILE_TYPE_NONE && tile_type < TILE_TYPE_COUNT);
-        new_chunk.tiles[i] = tile_type;
+        new_chunk.tiles[i].type = tile_type;
+        new_chunk.tiles[i].object_index = INVALID_OBJECT_INDEX;
+
+        srand(game_world.map.seed + i * 17 + x * 29 + y * 43);
+        if (tile_type == TILE_TYPE_WATER) {
+            f32 random_value = math_frandom();
+            if (0.0f <= random_value && random_value <= 0.01f) {
+                new_chunk.objects[object_count].type = GAME_OBJECT_TYPE_LILY;
+                new_chunk.tiles[i].object_index = object_count;
+                object_count++;
+            }
+        } else if (tile_type == TILE_TYPE_GRASS) {
+            f32 random_value = math_frandom();
+            if (0.0f <= random_value && random_value <= 0.01f) {
+                new_chunk.objects[object_count].type = GAME_OBJECT_TYPE_BUSH;
+                new_chunk.tiles[i].object_index = object_count;
+                object_count++;
+            }
+        }
     }
 
     u64 chunks_length = darray_length(chunks);
@@ -1146,7 +1140,6 @@ int main(int argc, char *argv[])
     game_world.map.seed = math_random();
     game_world.map.octave_count = 2;
     game_world.map.bias = 2.0f;
-    game_world.objects = darray_create(sizeof(game_object_t));
 
     chunks = darray_create(sizeof(chunk_base_t));
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "defines.h"
+#include "common/game_world_types.h"
 
 typedef u32 player_id;
 typedef u8 tile_type_t;
@@ -34,9 +35,12 @@ typedef u8 tile_type_t;
 #define CHUNK_HEIGHT_PX (CHUNK_LENGTH * TILE_HEIGHT_PX)
 #define CHUNK_NUM_TILES (CHUNK_LENGTH * CHUNK_LENGTH)
 
+#define INVALID_OBJECT_INDEX -1
+
 typedef struct {
     i32 x, y;
-    tile_type_t tiles[CHUNK_NUM_TILES];
+    game_tile_t tiles[CHUNK_NUM_TILES];
+    game_object_t objects[CHUNK_NUM_TILES];
 #if defined(DEBUG)
     f32 noise_data[CHUNK_NUM_TILES];
 #endif

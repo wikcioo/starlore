@@ -53,7 +53,6 @@ void game_world_init(packet_game_world_init_t *packet, game_world_t *out_game_wo
     ASSERT(out_game_world);
 
     mem_copy(&out_game_world->map, &packet->map, sizeof(game_map_t));
-    out_game_world->objects = darray_create(sizeof(game_object_t));
 }
 
 void game_world_destroy(game_world_t *game_world)
@@ -66,7 +65,6 @@ void game_world_destroy(game_world_t *game_world)
 #endif
 
     darray_destroy(chunks);
-    darray_destroy(game_world->objects);
     texture_destroy(&terrain_spritesheet);
     texture_destroy(&vegetation_spritesheet);
 }
@@ -197,7 +195,7 @@ static void game_world_render_chunk(chunk_t *chunk, i32 x, i32 y)
     for (u32 j = 0; j < CHUNK_NUM_TILES; j++) {
         u32 col = j % CHUNK_LENGTH;
         u32 row = j / CHUNK_LENGTH;
-        tile_type_t tile_type = chunk->base.tiles[j];
+        tile_type_t tile_type = chunk->base.tiles[j].type;
 
         vec2 position = vec2_create(
             chunk_top_left_tile_pos.x + (col * TILE_WIDTH_PX),
@@ -210,6 +208,13 @@ static void game_world_render_chunk(chunk_t *chunk, i32 x, i32 y)
         mem_copy(tex_coord, &terrain_tex_coord[tile_type], sizeof(vec2) * TEX_COORD_COUNT);
 
         renderer_draw_quad_sprite_uv(position, size, 0.0f, &terrain_spritesheet, tex_coord);
+
+        i32 object_index = chunk->base.tiles[j].object_index;
+        if (object_index != INVALID_OBJECT_INDEX) {
+            game_object_t *game_object = &chunk->base.objects[object_index];
+            mem_copy(tex_coord, &vegetation_tex_coord[game_object->type], sizeof(vec2) * TEX_COORD_COUNT);
+            renderer_draw_quad_sprite_uv(position, size, 0.0f, &vegetation_spritesheet, tex_coord);
+        }
     }
 
 #if defined(DEBUG)
@@ -317,28 +322,6 @@ void game_world_render(game_world_t *game_world, const camera_t *const camera)
             snprintf(buffer, sizeof(buffer), "cached chunk\nage: %i\ncoords: %i:%i", chunk->age, x, y);
             renderer_draw_text(buffer, FA64, pos, 1.0f, COLOR_MILK, 1.0f);
         }
-    }
-#endif
-
-#if 0
-    // Render game objects
-    u64 num_objects = darray_length(game_world->objects);
-    for (u64 i = 0; i < num_objects; i++) {
-        i32 idx = game_world->objects[i].tile_index;
-        u32 row = idx / map_width;
-        u32 col = idx % map_width;
-
-        vec2 position = vec2_create(
-            map_start.x + (col * TILE_WIDTH_PX),
-            map_start.y + (row * TILE_HEIGHT_PX)
-        );
-
-        vec2 size = vec2_create(TILE_WIDTH_PX, TILE_HEIGHT_PX);
-
-        vec2 tex_coord[4] = {0};
-        mem_copy(tex_coord, &vegetation_tex_coord[game_world->objects[i].type], sizeof(vec2) * TEX_COORD_COUNT);
-
-        renderer_draw_quad_sprite_uv(position, size, 0.0f, &vegetation_spritesheet, tex_coord);
     }
 #endif
 }

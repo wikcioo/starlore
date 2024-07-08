@@ -20,7 +20,7 @@
 
 #define CHUNK_CACHE_MAX_ITEMS 48
 
-#define LOG_TEXTURE_CREATE 0
+#define LOG_TEXTURE_CREATE               0
 #define LOG_REACH_CHUNK_CACHE_SIZE_LIMIT 0
-
-#define LOG_CHUNK_TRANSACTIONS 0
+#define LOG_CHUNK_TRANSACTIONS           0
+#define LOG_NETWORK                      0

@@ -23,8 +23,12 @@ typedef enum {
 } tile_type_e;
 
 typedef struct {
+    u8 type;
+    i32 object_index;
+} game_tile_t;
+
+typedef struct {
     game_object_type_e type;
-    i32 tile_index;
 } game_object_t;
 
 typedef struct {
@@ -35,5 +39,4 @@ typedef struct {
 
 typedef struct {
     game_map_t map;
-    game_object_t *objects;
 } game_world_t;
