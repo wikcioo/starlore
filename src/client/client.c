@@ -23,6 +23,7 @@
 #include "chat.h"
 #include "window.h"
 #include "player.h"
+#include "inventory.h"
 #include "game_world.h"
 #include "camera.h"
 #include "color_palette.h"
@@ -50,6 +51,7 @@ extern vec2 main_window_size;
 static u32 remote_player_count = 0;
 static player_remote_t remote_players[MAX_PLAYER_COUNT];
 static player_self_t self_player;
+static b8 player_initialized = false;
 
 static f32 server_update_accumulator = 0.0f;
 
@@ -83,6 +85,7 @@ static b8 ui_test_panel_visible = false;
 #endif
 
 // Data referenced from somewhere else
+inventory_t player_inventory;
 char username[PLAYER_MAX_NAME_LENGTH];
 i32 client_socket;
 b8 is_camera_locked_on_player = true;
@@ -290,6 +293,8 @@ static void handle_socket_event(void)
                         self_player.base.id,
                         self_player.base.position.x, self_player.base.position.y,
                         self_player.base.color.r, self_player.base.color.g, self_player.base.color.b);
+                // TODO: send inventory data in player init packet
+                inventory_create(&player_inventory);
 
                 packet_player_init_confirm_t player_confirm_packet = {0};
                 player_confirm_packet.id = self_player.base.id;
@@ -299,6 +304,7 @@ static void handle_socket_event(void)
                 }
 
                 camera_set_position(&game_camera, self_player.base.position);
+                event_system_fire(EVENT_CODE_PLAYER_INIT, (event_data_t){0});
             } break;
             case PACKET_TYPE_PLAYER_ADD: {
                 received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_PLAYER_ADD];
@@ -588,6 +594,16 @@ static b8 window_resized_event_callback(event_code_e code, event_data_t data)
     }
 
     return false;
+}
+
+// Event fired after receiving PLAYER_INIT packet
+// Made as event callback so that resources are created in the main thread with OpenGL context
+static b8 player_init_callback(event_code_e code, event_data_t data)
+{
+    inventory_load_resources();
+    player_initialized = true;
+    LOG_TRACE("inventory resources loaded");
+    return true;
 }
 
 // Event fired after receiving GAME_WORLD_INIT packet
@@ -959,8 +975,13 @@ static void client_init_game_resources(void)
     event_system_register(EVENT_CODE_MOUSE_BUTTON_PRESSED, chat_mouse_button_pressed_event_callback);
     event_system_register(EVENT_CODE_WINDOW_RESIZED,       chat_window_resized_event_callback);
 
+    event_system_register(EVENT_CODE_PLAYER_INIT,  player_init_callback);
     event_system_register(EVENT_CODE_KEY_PRESSED,  player_key_pressed_event_callback);
     event_system_register(EVENT_CODE_KEY_RELEASED, player_key_released_event_callback);
+
+    event_system_register(EVENT_CODE_MOUSE_BUTTON_PRESSED,  inventory_mouse_button_pressed_event_callback);
+    event_system_register(EVENT_CODE_MOUSE_BUTTON_RELEASED, inventory_mouse_button_released_event_callback);
+    event_system_register(EVENT_CODE_KEY_PRESSED,           inventory_key_pressed_event_callback);
 
     event_system_register(EVENT_CODE_KEY_PRESSED,     game_world_key_pressed_event_callback);
     event_system_register(EVENT_CODE_GAME_WORLD_INIT, game_world_init_callback);
@@ -989,6 +1010,7 @@ static void client_shutdown_game_resources(void)
 
     LOG_INFO("removed self from players");
     player_self_destroy(&self_player);
+    inventory_destroy(&player_inventory);
 
     event_system_unregister(EVENT_CODE_CHAR_PRESSED,         chat_char_pressed_event_callback);
     event_system_unregister(EVENT_CODE_KEY_PRESSED,          chat_key_pressed_event_callback);
@@ -996,8 +1018,13 @@ static void client_shutdown_game_resources(void)
     event_system_unregister(EVENT_CODE_MOUSE_BUTTON_PRESSED, chat_mouse_button_pressed_event_callback);
     event_system_unregister(EVENT_CODE_WINDOW_RESIZED,       chat_window_resized_event_callback);
 
+    event_system_unregister(EVENT_CODE_PLAYER_INIT,  player_init_callback);
     event_system_unregister(EVENT_CODE_KEY_PRESSED,  player_key_pressed_event_callback);
     event_system_unregister(EVENT_CODE_KEY_RELEASED, player_key_released_event_callback);
+
+    event_system_unregister(EVENT_CODE_MOUSE_BUTTON_PRESSED,  inventory_mouse_button_pressed_event_callback);
+    event_system_unregister(EVENT_CODE_MOUSE_BUTTON_RELEASED, inventory_mouse_button_released_event_callback);
+    event_system_unregister(EVENT_CODE_KEY_PRESSED,         inventory_key_pressed_event_callback);
 
     event_system_unregister(EVENT_CODE_KEY_PRESSED,     game_world_key_pressed_event_callback);
     event_system_unregister(EVENT_CODE_GAME_WORLD_INIT, game_world_init_callback);
@@ -1054,6 +1081,10 @@ static void run_connected_client(f64 delta_time)
     renderer_begin_scene(&ui_camera);
 
     chat_render();
+    if (player_initialized) {
+        // TODO: render empty inventory if not initialized instead of not rendering at all
+        inventory_render(&player_inventory);
+    }
     display_build_version();
 
     char health_buffer[16];

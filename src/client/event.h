@@ -54,6 +54,8 @@ typedef enum {
 
     EVENT_CODE_WINDOW_MAXIMIZED,
 
+    EVENT_CODE_PLAYER_INIT,
+
     EVENT_CODE_GAME_WORLD_INIT,
 
     // data usage:
