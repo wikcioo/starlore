@@ -1,8 +1,6 @@
 #pragma once
 
 #include "defines.h"
-#include "common/maths.h"
-#include "common/containers/darray.h"
 
 typedef enum {
     GAME_OBJECT_TYPE_NONE,
@@ -23,7 +21,7 @@ typedef enum {
 } tile_type_e;
 
 typedef struct {
-    u8 type;
+    tile_type_e type;
     i32 object_index;
 } game_tile_t;
 

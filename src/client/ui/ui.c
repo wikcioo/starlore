@@ -753,7 +753,7 @@ b8 ui_input_text(const char *label, char *text, u32 max_size)
 
     u32 num_chars = math_min(strlen(text), max_size);
     u32 char_width = renderer_get_font_width(ui.config.fa_size);
-    if (!hashtable_key_exists(&ui.input_box_state, label)) {
+    if (!hashtable_is_set(&ui.input_box_state, label)) {
         input_box_state_t state = {
             .text_offset = 0,
             .cursor_offset = num_chars,

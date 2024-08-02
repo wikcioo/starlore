@@ -19,6 +19,18 @@ typedef union vec2 {
     };
 } vec2;
 
+typedef union vec2i {
+    i32 elements[2];
+    struct {
+        union {
+            i32 x, r, u;
+        };
+        union {
+            i32 y, g, v;
+        };
+    };
+} vec2i;
+
 typedef union vec3 {
     f32 elements[3];
     struct {
@@ -107,6 +119,11 @@ INLINE f32 math_maxf(f32 value_0, f32 value_1)
 INLINE i32 math_max(i32 value_0, i32 value_1)
 {
     return math_maxf((f32)value_0, (f32)value_1);
+}
+
+INLINE i32 math_abs(i32 value)
+{
+    return value >= 0 ? value : -value;
 }
 
 vec2 vec2_normalize(vec2 vector);

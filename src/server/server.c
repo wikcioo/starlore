@@ -15,6 +15,7 @@
 #include "config.h"
 #include "defines.h"
 #include "common/net.h"
+#include "common/util.h"
 #include "common/clock.h"
 #include "common/player_types.h"
 #include "common/global.h"
@@ -29,18 +30,7 @@
 #include "common/containers/darray.h"
 #include "common/containers/ring_buffer.h"
 
-#define INPUT_BUFFER_SIZE 4096
-#define INPUT_OVERFLOW_BUFFER_SIZE 256
-
-#define SERVER_BACKLOG 10
-#define INPUT_RING_BUFFER_CAPACITY 256
-#define PROCESSED_INPUT_LIMIT_PER_UPDATE 256
-
 #define POLL_INFINITE_TIMEOUT -1
-
-#define MAX_MESSAGE_LENGTH 1024
-
-#define PLAYER_SPAWN_POSITION vec2_create(0, 0)
 
 typedef struct {
     struct pollfd *fds;
@@ -202,7 +192,7 @@ void handle_new_player_connection(i32 client_socket)
         if (players[new_player_idx].id == PLAYER_INVALID_ID) { /* Free slot */
             players[new_player_idx].socket   = client_socket;
             players[new_player_idx].id       = current_player_id;
-            players[new_player_idx].position = PLAYER_SPAWN_POSITION;
+            players[new_player_idx].position = vec2_create(PLAYER_SPAWN_POSITION_X, PLAYER_SPAWN_POSITION_Y);
             players[new_player_idx].color    = vec3_create(red, green, blue);
             players[new_player_idx].health   = PLAYER_START_HEALTH;
             break;
@@ -211,7 +201,7 @@ void handle_new_player_connection(i32 client_socket)
 
     packet_player_init_t player_init_packet = {
         .id        = current_player_id,
-        .position  = PLAYER_SPAWN_POSITION,
+        .position  = vec2_create(PLAYER_SPAWN_POSITION_X, PLAYER_SPAWN_POSITION_Y),
         .color     = vec3_create(red, green, blue),
         .health    = PLAYER_START_HEALTH,
         .state     = PLAYER_STATE_IDLE,
@@ -575,8 +565,10 @@ void handle_packet_type(i32 client_socket, u8 *packet_body_buffer, u32 type, u32
 #if LOG_CHUNK_TRANSACTIONS
                 LOG_TRACE("requested chunk %i:%i but did not find in cache, generating...", request->x, request->y);
 #endif
-                chunk_base_t *new_chunk;
+                chunk_base_t *new_chunk = NULL;
                 generate_chunk(request->x, request->y, &new_chunk);
+
+                ASSERT_MSG(new_chunk, "chunk generation failure");
 
                 packet_chunk_response_t response = { .chunk = *new_chunk };
                 if (!packet_send(client_socket, PACKET_TYPE_CHUNK_RESPONSE, &response)) {
@@ -692,6 +684,28 @@ static b8 is_player_key(u32 key)
     return key == KEYCODE_W || key == KEYCODE_S || key == KEYCODE_A || key == KEYCODE_D || key == KEYCODE_Space || key == KEYCODE_LeftShift;
 }
 
+static vec2 tile_get_world_pos(i32 chunk_x, i32 chunk_y, u32 tile_idx)
+{
+    i32 tile_col = tile_idx % CHUNK_LENGTH;
+    i32 tile_row = CHUNK_LENGTH - (tile_idx / CHUNK_LENGTH) - 1;
+
+    i32 chunk_left = (chunk_x * CHUNK_WIDTH_PX)  - (CHUNK_WIDTH_PX  * 0.5f);
+    i32 chunk_top  = (chunk_y * CHUNK_HEIGHT_PX) + (CHUNK_HEIGHT_PX * 0.5f);
+
+    return (vec2){
+        .x = chunk_left + (tile_col * TILE_WIDTH_PX ) + (TILE_WIDTH_PX  * 0.5f),
+        .y = chunk_top  - (tile_row * TILE_HEIGHT_PX) - (TILE_HEIGHT_PX * 0.5f)
+    };
+}
+
+static vec2i player_position_to_chunk_position(vec2 player_position)
+{
+    return (vec2i){
+        .x = (player_position.x + (player_position.x < 0 ? -1 : 1) * (CHUNK_WIDTH_PX  * 0.5f)) / CHUNK_WIDTH_PX,
+        .y = (player_position.y + (player_position.y < 0 ? -1 : 1) * (CHUNK_HEIGHT_PX * 0.5f)) / CHUNK_HEIGHT_PX
+     };
+}
+
 static void process_player_input(u32 key, u32 mods, player_t *player, u32 damaged_players[MAX_PLAYER_COUNT])
 {
     if (key == KEYCODE_LeftShift) {
@@ -748,6 +762,39 @@ static void process_player_input(u32 key, u32 mods, player_t *player, u32 damage
                     player_t *other_player = &players[j];
                     if (rect_collide(attack_center, attack_size, other_player->position, vec2_create(size, size))) {
                         damaged_players[j] += PLAYER_DAMAGE_VALUE;
+                    }
+                }
+            }
+
+            u64 chunks_length = darray_length(chunks);
+            vec2i chunk_coords = player_position_to_chunk_position(player->position);
+            for (u64 i = 0; i < chunks_length; i++) {
+                chunk_base_t *chunk = &chunks[i];
+                // Check for all chunks around the player's chunk
+                if (math_abs(chunk_coords.x - chunk->x) <= 1 && math_abs(chunk_coords.y - chunk->y) <= 1) {
+                    for (u32 j = 0; j < CHUNK_NUM_TILES; j++) {
+                        if (chunk->tiles[j].object_index != INVALID_OBJECT_INDEX) {
+                            vec2 object_position = tile_get_world_pos(chunk->x, chunk->y, j);
+                            if (rect_collide(attack_center, attack_size, object_position, vec2_create(TILE_WIDTH_PX, TILE_HEIGHT_PX))) {
+                                // Remove object
+                                packet_game_world_object_remove_t object_remove_packet = {
+                                    .chunk_x = chunk->x,
+                                    .chunk_y = chunk->y,
+                                    .tile_idx = j,
+                                    .type = chunk->objects[chunk->tiles[j].object_index].type
+                                };
+
+                                for (i32 k = 0; k < MAX_PLAYER_COUNT; k++) {
+                                    if (players[k].id != PLAYER_INVALID_ID) {
+                                        if (!packet_send(players[k].socket, PACKET_TYPE_GAME_WORLD_OBJECT_REMOVE, &object_remove_packet)) {
+                                            LOG_ERROR("failed to send object remove packet to player with id=%u (%s)", players[k].id, players[k].name);
+                                        }
+                                    }
+                                }
+
+                                chunk->tiles[j].object_index = INVALID_OBJECT_INDEX;
+                            }
+                        }
                     }
                 }
             }
@@ -918,7 +965,7 @@ void process_pending_input(f64 delta_time)
                     // Update player state and send respawn packet to all players
                     player->state = PLAYER_STATE_IDLE;
                     player->health = PLAYER_START_HEALTH;
-                    player->position = PLAYER_SPAWN_POSITION;
+                    player->position = vec2_create(PLAYER_SPAWN_POSITION_X, PLAYER_SPAWN_POSITION_Y);
                     player->direction = PLAYER_DIRECTION_DOWN;
 
                     packet_player_respawn_t player_respawn_packet = {
@@ -1059,6 +1106,19 @@ static void generate_chunk(i32 x, i32 y, chunk_base_t **out_chunk)
     u64 chunks_length = darray_length(chunks);
     darray_push(chunks, new_chunk);
     *out_chunk = &chunks[chunks_length];
+
+#if LOG_CHUNK_MEMORY_FOOTPRINT
+{
+    static u64 prev_size_checkpoint = KiB(40);
+    u64 chunks_allocated_memory_size = darray_capacity(chunks) * sizeof(chunk_base_t);
+    if (chunks_allocated_memory_size > prev_size_checkpoint) {
+        f32 converted_value;
+        const char *unit = get_size_unit(chunks_allocated_memory_size, &converted_value);
+        LOG_INFO("allocated memory size for chunks crossed %0.2f %s", converted_value, unit);
+        prev_size_checkpoint *= 2;
+    }
+}
+#endif
 
     mem_free(perlin_noise_data, CHUNK_NUM_TILES * sizeof(f32), MEMORY_TAG_GAME);
 }

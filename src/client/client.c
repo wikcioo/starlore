@@ -41,9 +41,7 @@
 #include "common/memory/memutils.h"
 #include "common/containers/ring_buffer.h"
 
-#define POLLFD_COUNT 2
-#define INPUT_BUFFER_SIZE 8192
-#define OVERFLOW_BUFFER_SIZE 4096
+#define POLLFD_COUNT           2
 #define POLL_INFINITE_TIMEOUT -1
 
 extern vec2 main_window_size;
@@ -446,6 +444,11 @@ static void handle_socket_event(void)
                 game_world_init(game_world_init_packet, &game_world);
                 event_system_fire(EVENT_CODE_GAME_WORLD_INIT, (event_data_t){0});
             } break;
+            case PACKET_TYPE_GAME_WORLD_OBJECT_REMOVE: {
+                received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_GAME_WORLD_OBJECT_REMOVE];
+                packet_game_world_object_remove_t *game_world_object_remove_packet = (packet_game_world_object_remove_t *)(buffer + PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]);
+                game_world_remove_object(&game_world, game_world_object_remove_packet);
+            } break;
             case PACKET_TYPE_CHUNK_RESPONSE: {
                 received_data_size = PACKET_TYPE_SIZE[PACKET_TYPE_CHUNK_RESPONSE];
                 packet_chunk_response_t *response = (packet_chunk_response_t *)(buffer + PACKET_TYPE_SIZE[PACKET_TYPE_HEADER]);
@@ -453,8 +456,9 @@ static void handle_socket_event(void)
                 mem_copy(packet_memory_addr, response, sizeof(packet_chunk_response_t));
                 event_system_fire(EVENT_CODE_CHUNK_RECEIVED, (event_data_t){ .u64[0] = (u64)packet_memory_addr });
             } break;
-            default:
+            default: {
                 LOG_WARN("received unknown packet type, ignoring...");
+            }
         }
 
         u64 parsed_packet_size = PACKET_TYPE_SIZE[PACKET_TYPE_HEADER] + received_data_size;

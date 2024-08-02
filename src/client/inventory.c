@@ -38,6 +38,10 @@ static void inventory_swap_items(inventory_t *inventory, u32 src_index, u32 dest
     ASSERT(dest_index >= 0 && dest_index < INVENTORY_INITIAL_CAPACITY);
     ASSERT(inventory->items[src_index].type != ITEM_TYPE_NONE);
 
+    if (src_index == dest_index) {
+        return;
+    }
+
     if (inventory->items[dest_index].type == ITEM_TYPE_NONE) {
         mem_copy(&inventory->items[dest_index], &inventory->items[src_index], sizeof(inventory_item_t));
         mem_zero(&inventory->items[src_index], sizeof(inventory_item_t));
@@ -143,7 +147,7 @@ void inventory_render(inventory_t *inventory)
     ASSERT(inventory);
 
     vec2 item_position = vec2_create(
-        -INVENTORY_MAX_QUICK_ACCESS_ITEMS * 0.5f * (item_size.x + item_x_pad) - item_x_pad / 2.0f,
+        -INVENTORY_MAX_QUICK_ACCESS_ITEMS * 0.5f * (item_size.x + item_x_pad) + item_x_pad * 0.5f + item_size.x * 0.5f,
         -main_window_size.y * 0.5f + item_size.y * 0.5f + inventory_y_offset
     );
 
@@ -193,7 +197,7 @@ b8 inventory_mouse_button_pressed_event_callback(event_code_e code, event_data_t
     mp.y = main_window_size.y * 0.5f - mp.y;
 
     vec2 item_position = vec2_create(
-        -INVENTORY_MAX_QUICK_ACCESS_ITEMS * 0.5f * (item_size.x + item_x_pad) - item_x_pad / 2.0f,
+        -INVENTORY_MAX_QUICK_ACCESS_ITEMS * 0.5f * (item_size.x + item_x_pad) + item_x_pad * 0.5f + item_size.x * 0.5f,
         -main_window_size.y * 0.5f + item_size.y * 0.5f + inventory_y_offset
     );
 
@@ -222,7 +226,7 @@ b8 inventory_mouse_button_released_event_callback(event_code_e code, event_data_
     mp.y = main_window_size.y * 0.5f - mp.y;
 
     vec2 item_position = vec2_create(
-        -INVENTORY_MAX_QUICK_ACCESS_ITEMS * 0.5f * (item_size.x + item_x_pad) - item_x_pad / 2.0f,
+        -INVENTORY_MAX_QUICK_ACCESS_ITEMS * 0.5f * (item_size.x + item_x_pad) + item_x_pad * 0.5f + item_size.x * 0.5f,
         -main_window_size.y * 0.5f + item_size.y * 0.5f + inventory_y_offset
     );
 

@@ -177,14 +177,25 @@ void game_world_add_chunk(chunk_base_t *chunk, const camera_t *const camera)
 
 }
 
+void game_world_remove_object(game_world_t *game_world, packet_game_world_object_remove_t *packet)
+{
+    u64 chunks_length = darray_length(chunks);
+    for (u64 i = 0; i < chunks_length; i++) {
+        chunk_t *chunk = &chunks[i];
+        if (chunk->base.x == packet->chunk_x && chunk->base.y == packet->chunk_y) {
+            chunk->base.tiles[packet->tile_idx].object_index = INVALID_OBJECT_INDEX;
+        }
+    }
+}
+
 static void game_world_render_chunk(chunk_t *chunk, i32 x, i32 y)
 {
 #if defined(DEBUG)
-        if (show_perlin_noise_textures) {
-            vec2 position = vec2_create(x * CHUNK_WIDTH_PX, y * CHUNK_HEIGHT_PX);
-            static const vec2 size = {{ CHUNK_WIDTH_PX, CHUNK_HEIGHT_PX }};
-            renderer_draw_quad_sprite(position, size, 0.0f, &chunk->perlin_noise_texture);
-        } else {
+    if (show_perlin_noise_textures) {
+        vec2 position = vec2_create(x * CHUNK_WIDTH_PX, y * CHUNK_HEIGHT_PX);
+        static const vec2 size = {{ CHUNK_WIDTH_PX, CHUNK_HEIGHT_PX }};
+        renderer_draw_quad_sprite(position, size, 0.0f, &chunk->perlin_noise_texture);
+    } else {
 #endif
 
     vec2 chunk_top_left_tile_pos = vec2_create(
@@ -218,7 +229,7 @@ static void game_world_render_chunk(chunk_t *chunk, i32 x, i32 y)
     }
 
 #if defined(DEBUG)
-        }
+    }
 #endif
 }
 

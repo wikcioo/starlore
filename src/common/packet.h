@@ -24,6 +24,7 @@ typedef enum {
     PACKET_TYPE_PLAYER_RESPAWN,
     PACKET_TYPE_PLAYER_KEYPRESS,
     PACKET_TYPE_GAME_WORLD_INIT,
+    PACKET_TYPE_GAME_WORLD_OBJECT_REMOVE,
     PACKET_TYPE_CHUNK_REQUEST,
     PACKET_TYPE_CHUNK_RESPONSE,
     PACKET_TYPE_COUNT
@@ -123,6 +124,12 @@ typedef struct {
 } packet_game_world_init_t;
 
 typedef struct {
+    i32 chunk_x, chunk_y;
+    u32 tile_idx;
+    game_object_type_e type;
+} packet_game_world_object_remove_t;
+
+typedef struct {
     i32 x, y;
 } packet_chunk_request_t;
 
@@ -131,23 +138,24 @@ typedef struct {
 } packet_chunk_response_t;
 
 static const u32 PACKET_TYPE_SIZE[PACKET_TYPE_COUNT] = {
-    [PACKET_TYPE_NONE]                   = 0,
-    [PACKET_TYPE_HEADER]                 = sizeof(packet_header_t),
-    [PACKET_TYPE_PING]                   = sizeof(packet_ping_t),
-    [PACKET_TYPE_MESSAGE]                = sizeof(packet_message_t),
-    [PACKET_TYPE_MESSAGE_HISTORY]        = sizeof(packet_message_history_t),
-    [PACKET_TYPE_PLAYER_INIT]            = sizeof(packet_player_init_t),
-    [PACKET_TYPE_PLAYER_INIT_CONF]       = sizeof(packet_player_init_confirm_t),
-    [PACKET_TYPE_PLAYER_ADD]             = sizeof(packet_player_add_t),
-    [PACKET_TYPE_PLAYER_REMOVE]          = sizeof(packet_player_remove_t),
-    [PACKET_TYPE_PLAYER_UPDATE]          = sizeof(packet_player_update_t),
-    [PACKET_TYPE_PLAYER_HEALTH]          = sizeof(packet_player_health_t),
-    [PACKET_TYPE_PLAYER_DEATH]           = sizeof(packet_player_death_t),
-    [PACKET_TYPE_PLAYER_RESPAWN]         = sizeof(packet_player_respawn_t),
-    [PACKET_TYPE_PLAYER_KEYPRESS]        = sizeof(packet_player_keypress_t),
-    [PACKET_TYPE_GAME_WORLD_INIT]        = sizeof(packet_game_world_init_t),
-    [PACKET_TYPE_CHUNK_REQUEST]          = sizeof(packet_chunk_request_t),
-    [PACKET_TYPE_CHUNK_RESPONSE]         = sizeof(packet_chunk_response_t)
+    [PACKET_TYPE_NONE]                      = 0,
+    [PACKET_TYPE_HEADER]                    = sizeof(packet_header_t),
+    [PACKET_TYPE_PING]                      = sizeof(packet_ping_t),
+    [PACKET_TYPE_MESSAGE]                   = sizeof(packet_message_t),
+    [PACKET_TYPE_MESSAGE_HISTORY]           = sizeof(packet_message_history_t),
+    [PACKET_TYPE_PLAYER_INIT]               = sizeof(packet_player_init_t),
+    [PACKET_TYPE_PLAYER_INIT_CONF]          = sizeof(packet_player_init_confirm_t),
+    [PACKET_TYPE_PLAYER_ADD]                = sizeof(packet_player_add_t),
+    [PACKET_TYPE_PLAYER_REMOVE]             = sizeof(packet_player_remove_t),
+    [PACKET_TYPE_PLAYER_UPDATE]             = sizeof(packet_player_update_t),
+    [PACKET_TYPE_PLAYER_HEALTH]             = sizeof(packet_player_health_t),
+    [PACKET_TYPE_PLAYER_DEATH]              = sizeof(packet_player_death_t),
+    [PACKET_TYPE_PLAYER_RESPAWN]            = sizeof(packet_player_respawn_t),
+    [PACKET_TYPE_PLAYER_KEYPRESS]           = sizeof(packet_player_keypress_t),
+    [PACKET_TYPE_GAME_WORLD_INIT]           = sizeof(packet_game_world_init_t),
+    [PACKET_TYPE_GAME_WORLD_OBJECT_REMOVE]  = sizeof(packet_game_world_object_remove_t),
+    [PACKET_TYPE_CHUNK_REQUEST]             = sizeof(packet_chunk_request_t),
+    [PACKET_TYPE_CHUNK_RESPONSE]            = sizeof(packet_chunk_response_t)
 };
 
 b8 packet_send(i32 socket, u32 type, void *packet_data);

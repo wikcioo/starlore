@@ -9,6 +9,7 @@ void game_world_destroy(game_world_t *game_world);
 
 void game_world_load_resources(game_world_t *game_world);
 void game_world_add_chunk(chunk_base_t *chunk, const camera_t *const camera);
+void game_world_remove_object(game_world_t *game_world, packet_game_world_object_remove_t *packet);
 void game_world_render(game_world_t *game_world, const camera_t *const camera);
 
 u64 game_world_get_chunk_num(void);
